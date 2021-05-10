@@ -1,15 +1,15 @@
 import multiprocessing as mp
 from collections import defaultdict
 import numpy as np
+import matplotlib.pyplot as plt
+import os
 
 import pysam
 
 import cfg
 
 class Cigar():
-    '''
-    Enum for pysam's cigartuples encoding.
-    '''
+    ''' Enum for pysam's cigartuples encoding.  '''
     M = 0
     I = 1
     D = 2
@@ -21,6 +21,9 @@ class Cigar():
     X = 8
     B = 9
 
+
+# global enum for bases ACGT
+bases = {'A': 0, 'C': 1, 'G': 2, 'T': 3}
 
 
 def realign_bam(positions):
@@ -93,7 +96,8 @@ def realign_pos(pos):
                 read_move = True
                 ref_move = True
             else:
-                print("ERROR: unexpected CIGAR type for {}.".format(read.query_name))
+                print(f"ERROR: unexpected CIGAR type for {read.query_name}")
+                exit(1)
 
             # shift reference index by one base or deleted section
             if ref_move:
@@ -125,6 +129,8 @@ def realign_pos(pos):
 
     return alignments
 
+
+
 def write_bam(fname, alignments, header, bam=True):
     '''
     Write a `.bam` file for a set of alignments.
@@ -142,3 +148,151 @@ def write_bam(fname, alignments, header, bam=True):
                 a.mapping_quality = 60
                 fh.write(a)
     pysam.index(fname) 
+
+
+
+class BamStats:
+    ''' 
+    Class for calculating BAM file SUB/INDEL 
+    confusion matrices and error probabilities. 
+    '''
+
+    def __init__(self, bam_filename, out_dir="./stats"):
+
+        # create output directory if it doesn't exist
+        self.out_dir = out_dir
+        os.makedirs(out_dir, exist_ok=True)
+
+        # check that BAM exists, initialize
+        try:
+            self.bam = pysam.AlignmentFile(cfg.args.bam, 'rb')
+        except FileNotFoundError:
+            print(f"ERROR: BAM file '{cfg.args.bam}' not found.")
+            exit(1)
+
+        # get contig length (for pysam iteration)
+        try:
+            contig_idx = list(self.bam.references).index(cfg.args.contig)
+            self.contig_len = self.bam.lengths[contig_idx]
+        except ValueError:
+            print(f"ERROR: contig '{cfg.args.contig}' not found in '{self.bam}'.")
+            exit(1)
+
+        self.max_hp = 10
+        self.subs, self.hps = self.get_confusion_matrices()
+
+        print("> plotting confusion matrices")
+        self.plot_confusion_matrices()
+
+
+    def get_confusion_matrices(self):
+        ''' Load cached CMs if they exist. '''
+        if not cfg.args.force and \
+                os.path.isfile(f'{self.out_dir}/subs_cm.npy') and \
+                os.path.isfile(f'{self.out_dir}/hps_cm.npy'):
+            print("> loading confusion matrices")
+            return np.load(f'{self.out_dir}/subs_cm.npy'), \
+                    np.load(f'{self.out_dir}/hps_cm.npy')
+        else:
+            print("> calculating confusion matrices")
+            return self.calc_confusion_matrices()
+
+
+    def calc_confusion_matrices(self):
+        ''' Measure basecaller SUB/INDEL error profile. '''
+
+        # initialize results matrices
+        subs = np.zeros((len(bases), len(bases)))
+        hps = np.zeros((len(bases), self.max_hp, self.max_hp))
+
+        # iterate over all reference positions
+        contig_start = 0
+        contig_end = 70000
+        for col in self.bam.pileup(cfg.args.contig, contig_start, contig_end,
+                min_base_quality=0, min_mapping_quality=20):
+            if col.pos > contig_end: break
+
+            for read in col.pileups:
+                # get reference info
+                ref = read.alignment.get_reference_sequence().upper()
+                ref_pos = col.pos - read.alignment.reference_start
+                ref_base = ref[ref_pos]
+                if ref_base == 'N': continue
+
+                # update homopolymer confusion matrix
+                hp_ptr = ref_pos
+                if ref[hp_ptr] != ref[hp_ptr-1]: # only do stats at hp start
+                    while ref[hp_ptr] == ref[hp_ptr+1]: hp_ptr += 1
+                    hp_len = hp_ptr+1 - ref_pos
+
+                    # only do stats on homopolymers which fit in confusion mat
+                    if hp_len >= self.max_hp or hp_len+read.indel < 0 or \
+                            hp_len+read.indel >= self.max_hp: continue
+                    hps[bases[ref_base], hp_len, hp_len+read.indel] += 1
+
+                # update substitution matrix 
+                if read.query_position is None: continue
+                read_base = read.alignment.query_sequence[read.query_position]
+                subs[bases[ref_base], bases[read_base]] += 1
+            print(f"\r{col.pos} of {self.contig_len} positions processed" + \
+                    f" on contig '{cfg.args.contig}'.", end='', flush=True)
+
+        # cache results
+        np.save(f'{self.out_dir}/subs_cm', subs)
+        np.save(f'{self.out_dir}/hps_cm', hps)
+
+        return subs, hps
+
+
+    def plot_confusion_matrices(self):
+
+        # plot homopolymer confusion matrices
+        fig, ax = plt.subplots(2, 2, figsize=(15,15))
+        cmaps = [plt.cm.Reds, plt.cm.Blues, plt.cm.Oranges, plt.cm.Greens]
+        for base, idx in bases.items():
+            x_idx, y_idx = idx % 2, idx // 2
+            frac_matrix = self.hps[idx] / (1 + self.hps[idx].sum(axis=1))[:,np.newaxis]
+            ax[x_idx, y_idx].matshow(frac_matrix, cmap=cmaps[idx], alpha=0.3)
+            for i in range(self.max_hp):
+                total = np.sum(self.hps[idx,i])
+                for j in range(self.max_hp):
+                    count = int(self.hps[idx,i,j])
+                    frac = (count + 0.1 + int(i == j)*10) / (total + 10 +  self.max_hp/10)
+                    ax[x_idx, y_idx].text(x=j, y=i, 
+                            s=f'{count}\n{frac*100:.2f}%\n{-np.log(frac):.3f}', 
+                            va='center', ha='center')
+            ax[x_idx, y_idx].set_xlabel('Predicted')
+            ax[x_idx, y_idx].set_ylabel('Actual')
+            ax[x_idx, y_idx].set_title(f'{base}')
+        plt.suptitle('Homopolymer Confusion Matrices')
+        plt.tight_layout()
+        plt.savefig(f'{self.out_dir}/hps.png', dpi=300)
+
+        # plot substitution confusion matrix
+        fig, ax = plt.subplots(figsize=(5,5))
+        ax.matshow(self.subs, cmap=plt.cm.Greys, alpha=0.3)
+        for i in range(len(bases)):
+            total = np.sum(self.subs[i])
+            for j in range(len(bases)):
+                count = int(self.subs[i,j])
+                frac = (count + 0.1 + int(i==j)*10) / (total + 10 + self.max_hp/10)
+                ax.text(x=j, y=i, 
+                        s=f'{count}\n{frac*100:.2f}%\n{-np.log(frac):.3f}', 
+                        va='center', ha='center')
+        plt.xlabel('Predicted')
+        plt.ylabel('Actual')
+        ax.set_xticklabels([' '] + list(bases.keys()))
+        ax.set_yticklabels([' '] + list(bases.keys()))
+        plt.title(f'Substitutions CM')
+        plt.tight_layout()
+        plt.savefig(f'{self.out_dir}/subs.png', dpi=300)
+
+
+
+    def get_statistics(self):
+        ''' Calculate SUB/INDEL error rates. '''
+        pass
+
+
+
+

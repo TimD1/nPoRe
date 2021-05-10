@@ -6,7 +6,7 @@ import pysam
 
 import cfg
 from vcf import get_positions
-from bam import realign_bam
+from bam import realign_bam, BamStats
 
 
 def argparser():
@@ -24,12 +24,17 @@ def argparser():
     parser.add_argument("--contig", default="chr19")
     parser.add_argument("--min_qual", type=int, default=0)
     parser.add_argument("--window", type=int, default=25)
+    parser.add_argument("--force", action="store_true")
 
     return parser
 
 
 
 def main():
+
+    print("> calculating BAM statistics")
+    stats = BamStats(cfg.args.bam)
+    exit(0)
 
     print("> getting DeepVariant positions")
     positions = get_positions(cfg.args.vcf, cfg.args.min_qual, cfg.args.window)
