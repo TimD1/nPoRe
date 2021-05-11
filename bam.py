@@ -167,7 +167,7 @@ class BamStats:
 
     def get_ranges(self, start, stop):
         ''' Split (start, stop) into `n` even chunks. '''
-        width = 100
+        width = 1000
         starts = list(range(start, stop, width))
         stops = [ min(stop, st + width) for st in starts ]
         return list(zip(starts, stops))
@@ -214,7 +214,7 @@ class BamStats:
                     count = int(self.hps[idx,i,j])
                     frac = (count + 0.1 + int(i == j)*10) / (total + 10 +  cfg.args.max_hp/10)
                     ax[x_idx, y_idx].text(x=j, y=i, 
-                            s=f'{count}\n{frac*100:.2f}%\n{-np.log(frac):.3f}', 
+                            s=f'{count}\n{frac*100:.1f}%\n{-np.log(frac):.2f}', 
                             va='center', ha='center')
             ax[x_idx, y_idx].set_xlabel('Predicted')
             ax[x_idx, y_idx].set_ylabel('Actual')
@@ -232,7 +232,7 @@ class BamStats:
                 count = int(self.subs[i,j])
                 frac = (count + 0.1 + int(i==j)*10) / (total + 10 + cfg.args.max_hp/10)
                 ax.text(x=j, y=i, 
-                        s=f'{count}\n{frac*100:.2f}%\n{-np.log(frac):.3f}', 
+                        s=f'{count}\n{frac*100:.1f}%\n{-np.log(frac):.2f}', 
                         va='center', ha='center')
         plt.xlabel('Predicted')
         plt.ylabel('Actual')
@@ -275,37 +275,106 @@ def calc_confusion_matrices(range_tuple):
         exit(1)
 
     # iterate over all reference positions
-    beg, end = range_tuple
-    for col in bam.pileup(cfg.args.contig, beg, end,
-            min_base_quality=0, min_mapping_quality=20):
+    window_start, window_end = range_tuple
+    for read in bam.fetch(cfg.args.contig, window_start, window_end):
 
-        # only process data in this region
-        if col.pos >= end: break
-        if col.pos < beg: continue
+        ref = read.get_reference_sequence().upper() \
+                [max(0, window_start-read.reference_start) : window_end-read.reference_start]
 
-        for read in col.pileups:
-            # get reference info
-            ref = read.alignment.get_reference_sequence().upper()
-            ref_pos = col.pos - read.alignment.reference_start
-            ref_base = ref[ref_pos]
-            if ref_base == 'N': continue
+        # find read substring overlapping region
+        cigar_types = [ c[0] for c in read.cigartuples ]
+        cigar_counts = [ c[1] for c in read.cigartuples ]
+        read_idx, ref_idx = 0, read.reference_start
+        read_start = max(read.reference_start, window_start)
+        prev_cigar = None
+        prev_count = 0
 
-            # update homopolymer confusion matrix
-            hp_ptr = ref_pos
-            if ref[hp_ptr] != ref[hp_ptr-1]: # only do stats at hp start
-                while hp_ptr+1 < len(ref) and ref[hp_ptr] == ref[hp_ptr+1]: hp_ptr += 1
-                hp_len = hp_ptr+1 - ref_pos
-                # if hp_len >= 15: print(col.pos)
+        while ref_idx < window_end and ref_idx < read.reference_end:
 
-                # only do stats on homopolymers which fit in confusion mat
-                if hp_len >= cfg.args.max_hp or hp_len+read.indel < 0 or \
-                        hp_len+read.indel >= cfg.args.max_hp: continue
-                hps[bases[ref_base], hp_len, hp_len+read.indel] += 1
+            read_move, ref_move = None, None
+            cigar = cigar_types[0]
+            count = cigar_counts[0]
 
-            # update substitution matrix 
-            if read.query_position is None: continue
-            read_base = read.alignment.query_sequence[read.query_position]
-            subs[bases[ref_base], bases[read_base]] += 1
+            # determine whether to move on read/ref
+            if cigar == Cigar.S:    # soft-clipped
+                read_move = True
+                ref_move = False
+            elif cigar == Cigar.H:    # hard-clipped
+                read_move = False
+                ref_move = False
+            elif cigar == Cigar.X:    # substitution
+                read_move = True
+                ref_move = True
+            elif cigar == Cigar.I:    # insertion
+                read_move = True
+                ref_move = False
+            elif cigar == Cigar.D:    # deletion
+                read_move = False
+                ref_move = True
+            elif cigar == Cigar.E:    # match
+                read_move = True
+                ref_move = True
+            elif cigar == Cigar.M:    # match/sub
+                read_move = True
+                ref_move = True
+            else:
+                print(f"ERROR: unexpected CIGAR type for {read.query_name}")
+                exit(1)
+
+            if ref_idx >= read_start:
+                # update homopolymer confusion matrix
+                hp_ptr = ref_idx - read_start
+
+                hp_off_end = (hp_ptr+1) >= len(ref) # read ended prematurely, not INDEL
+                if not hp_off_end:
+                    # read just started, or new base seen (starting new HP)
+                    hp_start = (hp_ptr == 0) or ref[hp_ptr] != ref[hp_ptr-1]
+                    if hp_start and cigar != Cigar.S and cigar != Cigar.H: 
+                        while (not hp_off_end) and ref[hp_ptr] == ref[hp_ptr+1]: # get homopolymer length
+                            hp_ptr += 1
+                            hp_off_end = hp_ptr+1 >= len(ref)
+
+                        if not hp_off_end: # full HP in read
+                            hp_len = hp_ptr+1 - (ref_idx-read_start)
+
+                            # calculate INDEL length (if present)
+                            indel = 0
+                            if prev_cigar == Cigar.I:
+                                indel = prev_count
+                            elif cigar == Cigar.D:
+                                indel = -count
+
+                            # only do stats on homopolymers which fit in confusion mat
+                            if not (hp_len >= cfg.args.max_hp or hp_len+indel < 0 or \
+                                    hp_len+indel >= cfg.args.max_hp):
+                                hps[bases[ref[ref_idx-read_start]], hp_len, hp_len+indel] += 1
+
+            # store previous action (to detect indels directly prior to HP)
+            if cigar != prev_cigar:
+                prev_cigar = cigar
+                prev_count = count
+
+            # shift reference index by one base or deleted section
+            if ref_move:
+                if read_move:
+                    if ref_idx >= read_start:
+                        subs[ bases[ref[ref_idx-read_start]], 
+                              bases[read.query_sequence[read_idx]]] += 1
+                    ref_idx += 1
+                else:
+                    ref_idx += count
+
+            # shift read index
+            if read_move:
+                cigar_counts[0] -= 1
+                read_idx += 1
+            else:
+                cigar_counts[0] = 0
+
+            # move to next CIGAR section of interest
+            if cigar_counts[0] == 0:
+                del cigar_counts[0]
+                del cigar_types[0]
 
         with cfg.pos_count.get_lock():
             cfg.pos_count.value += 1
