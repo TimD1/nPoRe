@@ -151,104 +151,86 @@ def write_bam(fname, alignments, header, bam=True):
 
 
 
-class BamStats:
-    ''' 
-    Class for calculating BAM file SUB/INDEL 
-    confusion matrices and error probabilities. 
-    '''
 
-    def __init__(self, bam_filename):
-
-        self.subs, self.hps = self.get_confusion_matrices()
-
-        print("\n> plotting confusion matrices")
-        self.plot_confusion_matrices()
+def get_ranges(start, stop):
+    ''' Split (start, stop) into `n` even chunks. '''
+    starts = list(range(start, stop, cfg.args.chunk_width))
+    stops = [ min(stop, st + cfg.args.chunk_width) for st in starts ]
+    return list(zip(starts, stops))
 
 
-    def get_ranges(self, start, stop):
-        ''' Split (start, stop) into `n` even chunks. '''
-        width = 1000
-        starts = list(range(start, stop, width))
-        stops = [ min(stop, st + width) for st in starts ]
-        return list(zip(starts, stops))
+def get_confusion_matrices():
+    ''' Load cached CMs if they exist. '''
+    if not cfg.args.force and \
+            os.path.isfile(f'{cfg.args.stats_dir}/subs_cm.npy') and \
+            os.path.isfile(f'{cfg.args.stats_dir}/hps_cm.npy'):
+        print("> loading confusion matrices\r", end='')
+        return np.load(f'{cfg.args.stats_dir}/subs_cm.npy'), \
+                np.load(f'{cfg.args.stats_dir}/hps_cm.npy')
+    else:
+        print("> calculating confusion matrices")
+        print(f"0 of {(cfg.args.contig_end-cfg.args.contig_beg)//cfg.args.chunk_width} chunks processed"
+            f" ({cfg.args.contig}:{cfg.args.contig_beg}:{cfg.args.contig_end}).", end='', flush=True)
+        ranges = get_ranges(cfg.args.contig_beg, cfg.args.contig_end)
+        with mp.Pool() as pool: # multi-threaded
+            results = list(pool.map(calc_confusion_matrices, ranges))
+
+        # sum results
+        sub_cms, hp_cms = list(map(np.array, zip(*results)))
+        subs = np.sum(sub_cms, axis=0)
+        hps = np.sum(hp_cms, axis=0)
+
+        # cache results
+        np.save(f'{cfg.args.stats_dir}/subs_cm', subs)
+        np.save(f'{cfg.args.stats_dir}/hps_cm', hps)
+
+        return subs, hps
 
 
-    def get_confusion_matrices(self):
-        ''' Load cached CMs if they exist. '''
-        if not cfg.args.force and \
-                os.path.isfile(f'{cfg.args.stats_dir}/subs_cm.npy') and \
-                os.path.isfile(f'{cfg.args.stats_dir}/hps_cm.npy'):
-            print("> loading confusion matrices\r", end='')
-            return np.load(f'{cfg.args.stats_dir}/subs_cm.npy'), \
-                    np.load(f'{cfg.args.stats_dir}/hps_cm.npy')
-        else:
-            print("> calculating confusion matrices")
-            ranges = self.get_ranges(cfg.args.contig_beg, cfg.args.contig_end)
-            with mp.Pool() as pool: # multi-threaded
-                results = list(pool.map(calc_confusion_matrices, ranges))
+def plot_confusion_matrices(subs, hps):
 
-            # sum results
-            sub_cms, hp_cms = list(map(np.array, zip(*results)))
-            subs = np.sum(sub_cms, axis=0)
-            hps = np.sum(hp_cms, axis=0)
-
-            # cache results
-            np.save(f'{cfg.args.stats_dir}/subs_cm', subs)
-            np.save(f'{cfg.args.stats_dir}/hps_cm', hps)
-
-            return subs, hps
-
-
-    def plot_confusion_matrices(self):
-
-        # plot homopolymer confusion matrices
-        fig, ax = plt.subplots(2, 2, figsize=(30,30))
-        cmaps = [plt.cm.Reds, plt.cm.Blues, plt.cm.Oranges, plt.cm.Greens]
-        for base, idx in bases.items():
-            x_idx, y_idx = idx % 2, idx // 2
-            frac_matrix = self.hps[idx] / (1 + self.hps[idx].sum(axis=1))[:,np.newaxis]
-            ax[x_idx, y_idx].matshow(frac_matrix, cmap=cmaps[idx], alpha=0.3)
-            for i in range(cfg.args.max_hp):
-                total = np.sum(self.hps[idx,i])
-                for j in range(cfg.args.max_hp):
-                    count = int(self.hps[idx,i,j])
-                    frac = (count + 0.1 + int(i == j)*10) / (total + 10 +  cfg.args.max_hp/10)
-                    ax[x_idx, y_idx].text(x=j, y=i, 
-                            s=f'{count}\n{frac*100:.1f}%\n{-np.log(frac):.2f}', 
-                            va='center', ha='center')
-            ax[x_idx, y_idx].set_xlabel('Predicted')
-            ax[x_idx, y_idx].set_ylabel('Actual')
-            ax[x_idx, y_idx].set_title(f'{base}')
-        plt.suptitle('Homopolymer Confusion Matrices')
-        plt.tight_layout()
-        plt.savefig(f'{cfg.args.stats_dir}/hps.png', dpi=300)
-
-        # plot substitution confusion matrix
-        fig, ax = plt.subplots(figsize=(5,5))
-        ax.matshow(self.subs, cmap=plt.cm.Greys, alpha=0.3)
-        for i in range(len(bases)):
-            total = np.sum(self.subs[i])
-            for j in range(len(bases)):
-                count = int(self.subs[i,j])
-                frac = (count + 0.1 + int(i==j)*10) / (total + 10 + cfg.args.max_hp/10)
-                ax.text(x=j, y=i, 
+    # plot homopolymer confusion matrices
+    fig, ax = plt.subplots(2, 2, figsize=(30,30))
+    cmaps = [plt.cm.Reds, plt.cm.Blues, plt.cm.Oranges, plt.cm.Greens]
+    for base, idx in bases.items():
+        x_idx, y_idx = idx % 2, idx // 2
+        frac_matrix = hps[idx] / (1 + hps[idx].sum(axis=1))[:,np.newaxis]
+        ax[x_idx, y_idx].matshow(frac_matrix, cmap=cmaps[idx], alpha=0.3)
+        for i in range(cfg.args.max_hp):
+            total = np.sum(hps[idx,i])
+            for j in range(cfg.args.max_hp):
+                count = int(hps[idx,i,j])
+                frac = (count + 0.1 + int(i == j)*10) / (total + 10 +  cfg.args.max_hp/10)
+                ax[x_idx, y_idx].text(x=j, y=i, 
                         s=f'{count}\n{frac*100:.1f}%\n{-np.log(frac):.2f}', 
                         va='center', ha='center')
-        plt.xlabel('Predicted')
-        plt.ylabel('Actual')
-        ax.set_xticks(range(len(bases)))
-        ax.set_xticklabels(list(bases.keys()))
-        ax.set_yticks(range(len(bases)))
-        ax.set_yticklabels(list(bases.keys()))
-        plt.title(f'Substitutions CM')
-        plt.tight_layout()
-        plt.savefig(f'{cfg.args.stats_dir}/subs.png', dpi=300)
+        ax[x_idx, y_idx].set_xlabel('Predicted')
+        ax[x_idx, y_idx].set_ylabel('Actual')
+        ax[x_idx, y_idx].set_title(f'{base}')
+    plt.suptitle('Homopolymer Confusion Matrices')
+    plt.tight_layout()
+    plt.savefig(f'{cfg.args.stats_dir}/hps.png', dpi=300)
 
-
-
-    def get_statistics(self):
-        ''' Calculate SUB/INDEL error rates. '''
-        pass
+    # plot substitution confusion matrix
+    fig, ax = plt.subplots(figsize=(5,5))
+    ax.matshow(subs, cmap=plt.cm.Greys, alpha=0.3)
+    for i in range(len(bases)):
+        total = np.sum(subs[i])
+        for j in range(len(bases)):
+            count = int(subs[i,j])
+            frac = (count + 0.1 + int(i==j)*10) / (total + 10 + cfg.args.max_hp/10)
+            ax.text(x=j, y=i, 
+                    s=f'{count}\n{frac*100:.1f}%\n{-np.log(frac):.2f}', 
+                    va='center', ha='center')
+    plt.xlabel('Predicted')
+    plt.ylabel('Actual')
+    ax.set_xticks(range(len(bases)))
+    ax.set_xticklabels(list(bases.keys()))
+    ax.set_yticks(range(len(bases)))
+    ax.set_yticklabels(list(bases.keys()))
+    plt.title(f'Substitutions CM')
+    plt.tight_layout()
+    plt.savefig(f'{cfg.args.stats_dir}/subs.png', dpi=300)
 
 
 
@@ -376,11 +358,11 @@ def calc_confusion_matrices(range_tuple):
                 del cigar_counts[0]
                 del cigar_types[0]
 
-        with cfg.pos_count.get_lock():
-            cfg.pos_count.value += 1
-            print(f"\r{cfg.pos_count.value} of "
-                f"{cfg.args.contig_end-cfg.args.contig_beg} positions processed"
-                f" ({cfg.args.contig}:{cfg.args.contig_beg}:{cfg.args.contig_end}).", end='', flush=True)
+    with cfg.pos_count.get_lock():
+        cfg.pos_count.value += 1
+        print(f"\r{cfg.pos_count.value} of "
+            f"{(cfg.args.contig_end-cfg.args.contig_beg)//cfg.args.chunk_width} chunks processed"
+            f" ({cfg.args.contig}:{cfg.args.contig_beg}:{cfg.args.contig_end}).", end='', flush=True)
 
     return subs, hps
 

@@ -6,7 +6,7 @@ import pysam
 
 import cfg
 from vcf import get_positions
-from bam import realign_bam, BamStats
+from bam import *
 
 
 def argparser():
@@ -23,11 +23,12 @@ def argparser():
 
     parser.add_argument("--contig", default="chr19")
     parser.add_argument("--contig_beg", type=int, default=100000)
-    parser.add_argument("--contig_end", type=int, default=200000)
+    parser.add_argument("--contig_end", type=int, default=110000)
 
     parser.add_argument("--min_qual", type=int, default=0)
     parser.add_argument("--max_hp", type=int, default=10)
     parser.add_argument("--window", type=int, default=25)
+    parser.add_argument("--chunk_width", type=int, default=1000)
 
     parser.add_argument("--stats_dir", default="./stats")
 
@@ -41,14 +42,20 @@ def main():
 
     print("> calculating BAM statistics")
     os.makedirs(cfg.args.stats_dir, exist_ok=True)
-    stats = BamStats(cfg.args.bam)
+    subs, hps = get_confusion_matrices()
+
+    print("\n> plotting confusion matrices")
+    plot_confusion_matrices(subs, hps)
     exit(0)
+
+    print("\n> calculating SUB / INDEL score matrices")
+    # sub_scores, hp_scores = calc_score_matrices(subs, hps)
 
     print("> getting DeepVariant positions")
     positions = get_positions(cfg.args.vcf, cfg.args.min_qual, cfg.args.window)
 
     print("> computing realignments")
-    alignments = realign_bam(positions)
+    # alignments = realign_bam(positions, sub_scores, hp_scores)
 
     print("> saving results")
     # write_results(alignments, bam, args.out)
