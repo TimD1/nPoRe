@@ -6,62 +6,30 @@ import sys
 from io import StringIO
 
 
-class ScoringMatrix(object):
-    ''' Store matrix of substitution penalties. '''
+def calc_score_matrices(subs, hps):
 
-    def __init__(self, filename=None):
-        '''
-        Read scoring matrix from a file or string
+    # calculate homopolymer scores matrix
+    hp_scores = np.zeros_like(hps)
+    for base in cfg.bases.values():
+        for ref_len in range(cfg.args.max_hp):
+            total = np.sum(hps[base, ref_len])
+            for call_len in range(cfg.args.max_hp):
+                count = int(hps[base, ref_len, call_len])
+                bias = 10
+                frac = (count + 0.1 + int(i==j)*bias) / (total + 0.1*cfg.args.max_hp + bias)
+                hp_scores[base, ref_len, call_len] = -np.log(frac)
 
-        Matrix should be space-delimited in a format like:
+    # calculate substitution scores matrix
+    sub_scores = np.zeros_like(subs)
+    for i in range(len(cfg.bases)):
+        total = np.sum(subs[i])
+        for j in range(len(cfg.bases)):
+            count = int(subs[i,j])
+            bias = 10
+            frac = (count + 0.1 + int(i==j)*bias) / (total + 0.1*cfg.args.max_hp + bias)
+            sub_scores[i, j] = -np.log(frac)
 
-          A C G T
-        A 1 0 0 0
-        C 0 1 0 0
-        G 0 0 1 0
-        T 0 0 0 1
-
-        Rows and Columns must be in the same order
-        '''
-        fs = open(filename)
-        self.scores = []
-        self.bases = None
-        for line in fs:
-            if line[0] == '#' or not line.strip():
-                continue
-
-            if not self.bases:
-                self.bases = line.split()
-                self.base_count = len(self.bases)
-            else:
-                cols = line.split()
-                self.scores.extend([float(x) for x in cols[1:]])
-        fs.close()
-
-
-    def score(self, one, two):
-        ''' Retrieve alignment score for two bases. '''
-        one_idx = 0
-        two_idx = 0
-        for i, b in enumerate(self.bases):
-            if b == one:
-                one_idx = i
-            if b == two:
-                two_idx = i
-        return self.scores[(one_idx * self.base_count) + two_idx]
-
-
-
-class IdentityScoringMatrix(object):
-    ''' Equal penalties for all substitution combinations. '''
-    def __init__(self, match=0, mismatch=1):
-        self.match = match
-        self.mismatch = mismatch
-
-    def score(self, one, two):
-        if one == two:
-            return self.match
-        return self.mismatch
+    return sub_scores, hp_scores
 
 
 
@@ -80,25 +48,17 @@ class Matrix(object):
 
 
 
-class LocalAlignment(object):
+class Alignment(object):
     ''' Class for performing local alignment. '''
-    def __init__(self, scoring_matrix, gap_penalty=2, gap_extension_penalty=0.5,
-            verbose=False):
+    def __init__(self, sub_scores, hp_scores, verbose=False):
         ''' Set parameters for local alignment. '''
-        self.scoring_matrix = scoring_matrix
-        self.gap_penalty = gap_penalty
-        self.gap_extension_penalty = gap_extension_penalty
+        self.sub_scores = sub_scores
+        self.hp_scores = hp_scores
         self.verbose = verbose
 
 
     def align(self, ref, query, ref_name='', query_name='', rc=False):
         ''' Perform alignment. '''
-
-        # convert sequences to upper-case
-        orig_ref = ref
-        orig_query = query
-        ref = ref.upper()
-        query = query.upper()
 
         # initialize first row/col of matrix
         matrix = Matrix( len(query)+1, len(ref)+1, (0, ' ', 0))
@@ -188,7 +148,7 @@ class LocalAlignment(object):
             print(aln)
 
         # return alignment
-        return Alignment(orig_query, orig_ref, row, col, _reduce_cigar(aln), 
+        return Alignment(query, ref, row, col, _reduce_cigar(aln), 
                 matrix.get(matrix.rows-1, matrix.cols-1)[VALUE], 
                 ref_name, query_name, rc)
 
@@ -262,11 +222,8 @@ class Alignment(object):
         self.r_offset = 0
         self.r_region = None
 
-        self.orig_query = query
-        self.query = query.upper()
-
-        self.orig_ref = ref
-        self.ref = ref.upper()
+        self.query = query
+        self.ref = ref
 
         q_len = 0
         r_len = 0
@@ -360,8 +317,8 @@ class Alignment(object):
                 qlen += count
                 rlen += count
                 for k in range(count):
-                    q += self.orig_query[j]
-                    r += self.orig_ref[i]
+                    q += self.query[j]
+                    r += self.ref[i]
                     if self.query[j] == self.ref[i]:
                         m += '|'
                     else:
@@ -373,13 +330,13 @@ class Alignment(object):
                 rlen += count
                 for k in range(count):
                     q += '-'
-                    r += self.orig_ref[i]
+                    r += self.ref[i]
                     m += ' '
                     i += 1
             elif op == 'I':
                 qlen += count
                 for k in range(count):
-                    q += self.orig_query[j]
+                    q += self.query[j]
                     r += '-'
                     m += ' '
                     j += 1
@@ -464,9 +421,3 @@ class Alignment(object):
         out.write("Matches: %s (%.1f%%)\n" % (self.matches, self.identity * 100))
         out.write("Mismatches: %s\n" % (self.mismatches,))
         out.write("CIGAR: %s\n" % self.cigar_str)
-
-
-
-sw = LocalAlignment(IdentityScoringMatrix())
-sw.align('ACACACTA','AGCACACA').dump()
-sw.align("AAGGGGAGGACGATGCGGATGTTC","AGGGAGGACGATGCGG").dump()

@@ -1,12 +1,14 @@
 import multiprocessing as mp
 from collections import defaultdict
 import numpy as np
+from numpy.polynomial.polynomial import polyfit
 import matplotlib.pyplot as plt
 import os
 
 import pysam
 
 import cfg
+from aln import *
 
 class Cigar():
     ''' Enum for pysam's cigartuples encoding.  '''
@@ -21,9 +23,6 @@ class Cigar():
     X = 8
     B = 9
 
-
-# global enum for bases ACGT
-bases = {'A': 0, 'C': 1, 'G': 2, 'T': 3}
 
 
 def realign_bam(positions):
@@ -124,8 +123,8 @@ def realign_pos(pos):
         print(f'\nref:\t{ref}')
         print(f'seq:\t{seq}')
 
-
-        # alignments[read.alignment.query_name].append((ref_start, ref_end, cigar))
+        sw = LocalAlignment(IdentityScoringMatrix())
+        sw.align(seq, ref).dump()
 
     return alignments
 
@@ -151,12 +150,12 @@ def write_bam(fname, alignments, header, bam=True):
 
 
 
-
 def get_ranges(start, stop):
     ''' Split (start, stop) into `n` even chunks. '''
     starts = list(range(start, stop, cfg.args.chunk_width))
     stops = [ min(stop, st + cfg.args.chunk_width) for st in starts ]
     return list(zip(starts, stops))
+
 
 
 def get_confusion_matrices():
@@ -187,15 +186,102 @@ def get_confusion_matrices():
         return subs, hps
 
 
+
+def fit_curve(hps):
+
+    # merge complement bps and convert cm to percentages
+    at_hps = hps[cfg.bases['A']] + hps[cfg.bases['T']]
+    gc_hps = hps[cfg.bases['G']] + hps[cfg.bases['C']]
+    at_pct = (at_hps+0.00001) / (1 + np.sum(at_hps, axis=1))[:, np.newaxis]
+    gc_pct = (gc_hps+0.00001) / (1 + np.sum(gc_hps, axis=1))[:, np.newaxis]
+
+    # 0: PERCENT HP CORRECT
+    # plot percentage correctness (by hp length)
+    fig, ax = plt.subplots(3, 1, figsize=(15,25))
+    hp_lens = range(1, 15) # at most max_hp-1
+    at_pct_correct = [at_pct[i,i] for i in hp_lens]
+    gc_pct_correct = [gc_pct[i,i] for i in hp_lens]
+    ax[0].plot(hp_lens, at_pct_correct, color='red', linestyle='', marker='o', alpha=0.5)
+    ax[0].plot(hp_lens, gc_pct_correct, color='blue', linestyle='', marker='o', alpha=0.5)
+    ax[0].set_xlabel('Actual Homopolymer Length')
+    ax[0].set_ylabel('Percent Correct')
+    ax[0].legend(['AT', 'GC'])
+
+    # show polynomial fit
+    at_b_cor, at_m_cor = polyfit(hp_lens, np.log(at_pct_correct), 1)
+    gc_b_cor, gc_m_cor = polyfit(hp_lens, np.log(gc_pct_correct), 1)
+    # ax[0].plot(hp_lens, np.exp(at_m_cor*hp_lens + at_b_cor), color='k', linestyle=':', alpha=0.5)
+    # ax[0].plot(hp_lens, np.exp(gc_m_cor*hp_lens + gc_b_cor), color='k', linestyle=':', alpha=0.5)
+
+    # 1: HP LENGTH MEAN
+    # overwrite correct hp length (by interpolating), for separate distribution
+    for l in hp_lens:
+        at_pct[l,l] = (at_pct[l,l-1] + at_pct[l,l+1]) / 2
+        gc_pct[l,l] = (gc_pct[l,l-1] + gc_pct[l,l+1]) / 2
+
+    # estimate gaussian distributions for hp lengths
+    at_means = [np.dot(at_pct[l], np.array(range(cfg.args.max_hp))) for l in hp_lens]
+    gc_means = [np.dot(gc_pct[l], np.array(range(cfg.args.max_hp))) for l in hp_lens]
+    ax[1].plot(hp_lens, at_means, color='red', linestyle='', marker='o', alpha=0.5)
+    ax[1].plot(hp_lens, gc_means, color='blue', linestyle='', marker='o', alpha=0.5)
+    at_b_mean, at_m_mean = polyfit(hp_lens, at_means, 1)
+    gc_b_mean, gc_m_mean = polyfit(hp_lens, gc_means, 1)
+    ax[1].plot(hp_lens, at_m_mean*hp_lens + at_b_mean, color='k', linestyle=':', alpha=0.5)
+    ax[1].plot(hp_lens, gc_m_mean*hp_lens + gc_b_mean, color='k', linestyle=':', alpha=0.5)
+    ax[1].set_xlabel('Actual Homopolymer Length')
+    ax[1].set_ylabel('Mean Length Called')
+
+    # 2: HP LENGTH STDDEV
+    at_stds = []
+    for l in hp_lens:
+        vals = []
+        for i in range(cfg.args.max_hp):
+            vals.extend(int(1000*at_pct[l,i])*[i])
+        at_stds.append(np.std(vals))
+    gc_stds = []
+    for l in hp_lens:
+        vals = []
+        for i in range(cfg.args.max_hp):
+            vals.extend(int(1000*gc_pct[l,i])*[i])
+        gc_stds.append(np.std(vals))
+    ax[2].plot(hp_lens, at_stds, color='red', linestyle='', marker='o', alpha=0.5)
+    ax[2].plot(hp_lens, gc_stds, color='blue', linestyle='', marker='o', alpha=0.5)
+    at_b_std, at_m_std = polyfit(hp_lens, at_stds, 1)
+    gc_b_std, gc_m_std = polyfit(hp_lens, gc_stds, 1)
+    ax[2].plot(hp_lens, at_m_std*hp_lens + at_b_std, color='k', linestyle=':', alpha=0.5)
+    ax[2].plot(hp_lens, gc_m_std*hp_lens + gc_b_std, color='k', linestyle=':', alpha=0.5)
+    ax[2].set_xlabel('Actual Homopolymer Length')
+    ax[2].set_ylabel('Standard Deviation of Length Called')
+
+    plt.tight_layout()
+    plt.savefig(f'{cfg.args.stats_dir}/best_fit.png', dpi=200)
+
+
+
+def plot_dists(hps):
+    colors = ['red', 'blue', 'orange', 'green']
+    for l in range(cfg.args.max_hp):
+        fig, ax = plt.subplots(1, 1, figsize=(10,10))
+        for base, base_idx in cfg.bases.items():
+            hp_lens = hps[base_idx, l, :] / (1 + np.sum(hps[base_idx, l, :]))
+            ax.step(range(cfg.args.max_hp), hp_lens, alpha=0.5, color=colors[base_idx])
+        ax.set_title(str(l))
+        ax.legend(list(cfg.bases.keys()))
+        plt.tight_layout()
+        plt.savefig(f'{cfg.args.stats_dir}/hp{l}_dist.png', dpi=200)
+        plt.close()
+
+
+
 def plot_confusion_matrices(subs, hps):
 
     # plot homopolymer confusion matrices
     fig, ax = plt.subplots(2, 2, figsize=(30,30))
     cmaps = [plt.cm.Reds, plt.cm.Blues, plt.cm.Oranges, plt.cm.Greens]
-    for base, idx in bases.items():
+    for base, idx in cfg.bases.items():
         x_idx, y_idx = idx % 2, idx // 2
         frac_matrix = hps[idx] / (1 + hps[idx].sum(axis=1))[:,np.newaxis]
-        ax[x_idx, y_idx].matshow(frac_matrix, cmap=cmaps[idx], alpha=0.3)
+        ax[x_idx, y_idx].matshow(frac_matrix, cmap=cmaps[idx], alpha=0.5)
         for i in range(cfg.args.max_hp):
             total = np.sum(hps[idx,i])
             for j in range(cfg.args.max_hp):
@@ -210,13 +296,14 @@ def plot_confusion_matrices(subs, hps):
     plt.suptitle('Homopolymer Confusion Matrices')
     plt.tight_layout()
     plt.savefig(f'{cfg.args.stats_dir}/hps.png', dpi=300)
+    plt.close()
 
     # plot substitution confusion matrix
     fig, ax = plt.subplots(figsize=(5,5))
-    ax.matshow(subs, cmap=plt.cm.Greys, alpha=0.3)
-    for i in range(len(bases)):
+    ax.matshow(subs, cmap=plt.cm.Greys, alpha=0.5)
+    for i in range(len(cfg.bases)):
         total = np.sum(subs[i])
-        for j in range(len(bases)):
+        for j in range(len(cfg.bases)):
             count = int(subs[i,j])
             frac = (count + 0.1 + int(i==j)*10) / (total + 10 + cfg.args.max_hp/10)
             ax.text(x=j, y=i, 
@@ -224,13 +311,14 @@ def plot_confusion_matrices(subs, hps):
                     va='center', ha='center')
     plt.xlabel('Predicted')
     plt.ylabel('Actual')
-    ax.set_xticks(range(len(bases)))
-    ax.set_xticklabels(list(bases.keys()))
-    ax.set_yticks(range(len(bases)))
-    ax.set_yticklabels(list(bases.keys()))
+    ax.set_xticks(range(len(cfg.bases)))
+    ax.set_xticklabels(list(cfg.bases.keys()))
+    ax.set_yticks(range(len(cfg.bases)))
+    ax.set_yticklabels(list(cfg.bases.keys()))
     plt.title(f'Substitutions CM')
     plt.tight_layout()
     plt.savefig(f'{cfg.args.stats_dir}/subs.png', dpi=300)
+    plt.close()
 
 
 
@@ -238,8 +326,8 @@ def calc_confusion_matrices(range_tuple):
     ''' Measure basecaller SUB/INDEL error profile. '''
 
     # initialize results matrices
-    subs = np.zeros((len(bases), len(bases)))
-    hps = np.zeros((len(bases), cfg.args.max_hp, cfg.args.max_hp))
+    subs = np.zeros((len(cfg.bases), len(cfg.bases)))
+    hps = np.zeros((len(cfg.bases), cfg.args.max_hp, cfg.args.max_hp))
 
     # check that BAM exists, initialize
     try:
@@ -329,7 +417,7 @@ def calc_confusion_matrices(range_tuple):
                             # only do stats on homopolymers which fit in confusion mat
                             if not (hp_len >= cfg.args.max_hp or hp_len+indel < 0 or \
                                     hp_len+indel >= cfg.args.max_hp):
-                                hps[bases[ref[ref_idx-read_start]], hp_len, hp_len+indel] += 1
+                                hps[cfg.bases[ref[ref_idx-read_start]], hp_len, hp_len+indel] += 1
 
             # store previous action (to detect indels directly prior to HP)
             if cigar != prev_cigar:
@@ -340,8 +428,9 @@ def calc_confusion_matrices(range_tuple):
             if ref_move:
                 if read_move:
                     if ref_idx >= read_start:
-                        subs[ bases[ref[ref_idx-read_start]], 
-                              bases[read.query_sequence[read_idx]]] += 1
+                        if ref[ref_idx-read_start] != 'N':
+                            subs[ cfg.bases[ref[ref_idx-read_start]], 
+                                  cfg.bases[read.query_sequence[read_idx]]] += 1
                     ref_idx += 1
                 else:
                     ref_idx += count
