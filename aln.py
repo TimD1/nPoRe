@@ -4,7 +4,48 @@ Simple Smith-Waterman aligner
 '''
 import sys
 import numpy as np
+import matplotlib.pyplot as plt
 import cfg
+
+
+def smooth_matrix(scores, delta = 0.01):
+    ''' Modify matrix so scores follow expected pattern. '''
+
+    # don't penalize diagonals
+    l = scores.shape[0]
+    for i in range(l):
+        scores[i, i] = 0
+
+    # more insertions should be more penalized
+    for i in reversed(range(l-1)):
+        for j in range(i+1, l):
+            scores[i,j] = max(
+                    scores[i,j], 
+                    scores[i+1,j] + delta, 
+                    scores[i,j-1] + delta
+            )
+
+    # more deletions should be more penalized
+    for i in range(1,l):
+        for j in reversed(range(0, i)):
+            scores[i,j] = max(
+                    scores[i,j], 
+                    scores[i,j+1] + delta, 
+                    scores[i-1,j] + delta
+            )
+            # print(f'({i},{j}) ', end='')
+        # print(' ')
+
+    # prefer indels from longer homopolymers
+    for i in range(1,l):
+        for j in range(1,l):
+            if i != j:
+                scores[i,j] = min(
+                        scores[i,j], 
+                        scores[i-1,j-1] - delta
+                )
+
+    return scores
 
 
 def calc_score_matrices(subs, hps):
@@ -19,18 +60,26 @@ def calc_score_matrices(subs, hps):
             bias = 10
             frac = (count + 0.1 + int(ref_len==call_len)*bias) / (total + 0.1*cfg.args.max_hp + bias)
             hp_scores[ref_len, call_len] = -np.log(frac)
+    hp_scores = smooth_matrix(hp_scores)
 
     # calculate substitution scores matrix
     sub_scores = np.zeros_like(subs)
     for i in range(len(cfg.bases)):
         total = np.sum(subs[i])
         for j in range(len(cfg.bases)):
-            count = int(subs[i,j])
-            bias = 10
-            frac = (count + 0.1 + int(i==j)*bias) / (total + 0.1*cfg.args.max_hp + bias)
-            sub_scores[i, j] = -np.log(frac)
+            sub_scores[i, j] = -np.log( (subs[i,j]+0.1) / total )
 
     return sub_scores, hp_scores
+
+
+def plot_hp_score_matrix(hps):
+    plt.figure(figsize=(15,15))
+    plot = plt.contour(hps, levels=10)
+    plt.xlabel('Homopolymer Length Called')
+    plt.ylabel('Actual Homopolymer Length')
+    plt.tight_layout()
+    plt.savefig(f'{cfg.args.stats_dir}/score_mat.png', dpi=200)
+
 
 
 
@@ -137,12 +186,12 @@ class Aligner(object):
 
                 # calculate HP lengthening score
                 lhp_run = 1
-                if query_idx+1 < len(query) and \
-                        query[query_idx+1] == query[query_idx]: # only insert same base
+                if query_idx+2 < len(query) and ref_idx+1 < len(ref) and \
+                        query[query_idx+1] == query[query_idx+2]: # only insert same base
                     if matrix.get(row-1, col)[TYPE] == 'L': # continue run
                         lhp_run = matrix.get(row-1, col)[RUNLEN] + 1
                     lhp_val = matrix.get(row-lhp_run, col)[VALUE] + \
-                            self.hp_indel_score(ref_hp_lens[ref_idx], lhp_run)
+                            self.hp_indel_score(ref_hp_lens[ref_idx+1], lhp_run)
                 else: # don't allow insertion of different base
                     lhp_val = matrix.get(row-1, col)[VALUE] + 100
 

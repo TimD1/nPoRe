@@ -55,13 +55,16 @@ def main():
     print("> calculating SUB / INDEL score matrices")
     cfg.args.sub_scores, cfg.args.hp_scores = calc_score_matrices(subs, hps)
 
+    print("> plotting score matrices")
+    plot_hp_score_matrix(cfg.args.hp_scores)
+
     print("> getting DeepVariant positions")
     positions = get_positions(cfg.args.vcf, cfg.args.min_qual, cfg.args.window)
 
     print("> computing realignments")
     alignments = realign_bam(positions)
 
-    print("> saving results")
+    # print("> saving results")
     # write_results(alignments, bam, args.out)
 
 
