@@ -3,21 +3,22 @@
 Simple Smith-Waterman aligner
 '''
 import sys
-from io import StringIO
+import numpy as np
+import cfg
 
 
 def calc_score_matrices(subs, hps):
 
     # calculate homopolymer scores matrix
+    hps = np.sum(hps, axis=0)
     hp_scores = np.zeros_like(hps)
-    for base in cfg.bases.values():
-        for ref_len in range(cfg.args.max_hp):
-            total = np.sum(hps[base, ref_len])
-            for call_len in range(cfg.args.max_hp):
-                count = int(hps[base, ref_len, call_len])
-                bias = 10
-                frac = (count + 0.1 + int(i==j)*bias) / (total + 0.1*cfg.args.max_hp + bias)
-                hp_scores[base, ref_len, call_len] = -np.log(frac)
+    for ref_len in range(cfg.args.max_hp):
+        total = np.sum(hps[ref_len])
+        for call_len in range(cfg.args.max_hp):
+            count = int(hps[ref_len, call_len])
+            bias = 10
+            frac = (count + 0.1 + int(ref_len==call_len)*bias) / (total + 0.1*cfg.args.max_hp + bias)
+            hp_scores[ref_len, call_len] = -np.log(frac)
 
     # calculate substitution scores matrix
     sub_scores = np.zeros_like(subs)
@@ -48,68 +49,126 @@ class Matrix(object):
 
 
 
-class Alignment(object):
+def get_hp_lengths(seq):
+    ''' Calculate HP length of substring starting at each index. '''
+
+    # TODO: make this more efficient
+    hp_lens = [0]*(len(seq))
+    for start in range(len(seq)):
+        for stop in range(start+1, len(seq)):
+            if seq[stop] != seq[start]:
+                hp_lens[start] = stop - start
+                break
+    hp_lens[-1] += 1
+    return hp_lens
+
+
+
+class Aligner(object):
     ''' Class for performing local alignment. '''
-    def __init__(self, sub_scores, hp_scores, verbose=False):
+    def __init__(self, sub_scores, hp_scores, indel_start=5, indel_extend=2, verbose=False):
         ''' Set parameters for local alignment. '''
         self.sub_scores = sub_scores
         self.hp_scores = hp_scores
+        self.indel_start = indel_start
+        self.indel_extend = indel_extend
         self.verbose = verbose
+
+
+    def hp_indel_score(self, ref_hp_len, indel_len):
+        if ref_hp_len >= cfg.args.max_hp:
+            ref_hp_len = cfg.args.max_hp-1
+        call_hp_len = min(max(0, ref_hp_len+indel_len), cfg.args.max_hp-1)
+        return self.hp_scores[ref_hp_len, call_hp_len]
+
+
+    def sub_score(self, query_base, ref_base):
+        return self.sub_scores[cfg.bases[ref_base], cfg.bases[query_base]]
 
 
     def align(self, ref, query, ref_name='', query_name='', rc=False):
         ''' Perform alignment. '''
 
-        # initialize first row/col of matrix
-        matrix = Matrix( len(query)+1, len(ref)+1, (0, ' ', 0))
-        for row in range(1, matrix.rows):
-            val = self.gap_penalty + (row-1) * self.gap_extension_penalty
-            matrix.set(row, 0, (val, 'I', row))
-        for col in range(1, matrix.cols):
-            val = self.gap_penalty + (row-1) * self.gap_extension_penalty
-            matrix.set(0, col, (val, 'D', col))
+        ref_hp_lens = get_hp_lengths(ref)
 
-        # calculate matrix
+        # initialize first row/col of matrix
         VALUE = 0
         TYPE = 1
         RUNLEN = 2
+        matrix = Matrix( len(query)+1, len(ref)+1, (0, ' ', 0))
+        for row in range(1, matrix.rows):
+            if row == 1: 
+                val = self.indel_start
+            else: 
+                val = matrix.get(row-1, 0)[VALUE] + self.indel_extend
+            matrix.set(row, 0, (val, 'I', row))
+        for col in range(1, matrix.cols):
+            if col == 1: 
+                val = self.indel_start
+            else: 
+                val = matrix.get(0, col-1)[VALUE] + self.indel_extend
+            matrix.set(0, col, (val, 'D', col))
+
+        # calculate matrix
         for row in range(1, matrix.rows):
             for col in range(1, matrix.cols):
+                ref_idx = col - 1
+                query_idx = row - 1
 
                 # look up score for match/sub
                 sub_val = matrix.get(row-1, col-1)[VALUE] + \
-                        self.scoring_matrix.score(query[row-1], ref[col-1])
+                        self.sub_score(query[query_idx], ref[ref_idx])
 
                 # calculate insertion score
-                ins_run = 0
-                if matrix.get(row - 1, col)[TYPE] == 'I':
-                    ins_run = matrix.get(row-1, col)[RUNLEN]
-                    ins_val = matrix.get(row-1, col)[VALUE] + \
-                            self.gap_extension_penalty
+                ins_run = 1
+                if matrix.get(row-1, col)[TYPE] == 'I': # continue INS
+                    ins_run = matrix.get(row-1, col)[RUNLEN] + 1
+                    ins_val = matrix.get(row-1, col)[VALUE] + self.indel_extend
                 else:
-                    ins_val = matrix.get(row-1, col)[VALUE] + self.gap_penalty
+                    ins_val = matrix.get(row-1, col)[VALUE] + self.indel_start
 
                 # calculate deletion score
-                del_run = 0
-                if matrix.get(row, col-1)[TYPE] == 'D':
-                    del_run = matrix.get(row, col - 1)[RUNLEN]
-                    del_val = matrix.get(row, col - 1)[VALUE] + \
-                            self.gap_extension_penalty
+                del_run = 1
+                if matrix.get(row, col-1)[TYPE] == 'D': # continue DEL
+                    del_run = matrix.get(row, col-1)[RUNLEN] + 1
+                    del_val = matrix.get(row, col-1)[VALUE] + self.indel_extend
                 else:
-                    del_val = matrix.get(row, col-1)[VALUE] + self.gap_penalty
+                    del_val = matrix.get(row, col-1)[VALUE] + self.indel_start
+
+                # calculate HP lengthening score
+                lhp_run = 1
+                if query_idx+1 < len(query) and \
+                        query[query_idx+1] == query[query_idx]: # only insert same base
+                    if matrix.get(row-1, col)[TYPE] == 'L': # continue run
+                        lhp_run = matrix.get(row-1, col)[RUNLEN] + 1
+                    lhp_val = matrix.get(row-lhp_run, col)[VALUE] + \
+                            self.hp_indel_score(ref_hp_lens[ref_idx], lhp_run)
+                else: # don't allow insertion of different base
+                    lhp_val = matrix.get(row-1, col)[VALUE] + 100
+
+                # calculate HP shortening score
+                shp_run = 1
+                if ref_idx+1 < len(ref) and \
+                        ref[ref_idx+1] == ref[ref_idx]: # only delete same base
+                    if matrix.get(row, col-1)[TYPE] == 'S': # continue run
+                        shp_run = matrix.get(row, col-1)[RUNLEN] + 1
+                    shp_val = matrix.get(row, col-shp_run)[VALUE] + \
+                            self.hp_indel_score(ref_hp_lens[ref_idx], -shp_run)
+                else: # don't allow insertion of different base
+                    shp_val = matrix.get(row, col-1)[VALUE] + 100
 
                 # determine optimal alignment for this cell
-                cell_val = min(sub_val, del_val, ins_val)
-                if del_run and cell_val == del_val: # continue deletion
-                    cell = (cell_val, 'D', del_run+1)
-                elif ins_run and cell_val == ins_val: # continue insertion
-                    cell = (cell_val, 'I', ins_run+1)
-                elif cell_val == sub_val: # match/sub
+                cell_val = min(sub_val, del_val, ins_val, lhp_val, shp_val)
+                if cell_val == sub_val: # match/sub
                     cell = (cell_val, 'M', 0)
                 elif cell_val == del_val: # start deletion
-                    cell = (cell_val, 'D', 1)
+                    cell = (cell_val, 'D', del_run)
                 elif cell_val == ins_val: # start insertion
-                    cell = (cell_val, 'I', 1)
+                    cell = (cell_val, 'I', ins_run)
+                elif cell_val == lhp_val: # lengthen homopolymer
+                    cell = (cell_val, 'L', lhp_run)
+                elif cell_val == shp_val: # shorten homopolymer
+                    cell = (cell_val, 'S', shp_run)
                 else:
                     cell = (0, 'X', 0) # error
 
@@ -126,6 +185,8 @@ class Alignment(object):
 
             # update path and alignment
             val, op, runlen = matrix.get(row, col)
+            if op == 'L': op = 'I'
+            if op == 'S': op = 'D'
             path.append((row, col))
             aln.append(op)
 

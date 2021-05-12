@@ -24,10 +24,10 @@ def argparser():
 
     parser.add_argument("--contig", default="chr19")
     parser.add_argument("--contig_beg", type=int, default=0)
-    parser.add_argument("--contig_end", type=int, default=50000000)
+    parser.add_argument("--contig_end", type=int, default=55000000)
 
     parser.add_argument("--min_qual", type=int, default=0)
-    parser.add_argument("--max_hp", type=int, default=50)
+    parser.add_argument("--max_hp", type=int, default=100)
     parser.add_argument("--window", type=int, default=25)
     parser.add_argument("--chunk_width", type=int, default=10000)
 
@@ -46,12 +46,11 @@ def main():
     subs, hps = get_confusion_matrices()
 
     # print("\n> plotting confusion matrices")
-    # plot_confusion_matrices(subs, hps)
+    # # plot_confusion_matrices(subs, hps)
     # print("\n> plotting distributions")
     # plot_dists(hps)
-    print("\n> plotting parameter fitting")
-    fit_curve(hps)
-    exit(0)
+    # print("\n> plotting parameter fitting")
+    # fit_curve(hps)
 
     print("> calculating SUB / INDEL score matrices")
     cfg.args.sub_scores, cfg.args.hp_scores = calc_score_matrices(subs, hps)

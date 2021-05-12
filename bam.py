@@ -42,6 +42,7 @@ def realign_pos(pos):
     Re-align all reads covering a single reference column (within window).
     '''
 
+    aligner = Aligner(cfg.args.sub_scores, cfg.args.hp_scores)
     alignments = defaultdict(list)
     bam = pysam.AlignmentFile(cfg.args.bam, 'rb')
 
@@ -123,8 +124,7 @@ def realign_pos(pos):
         print(f'\nref:\t{ref}')
         print(f'seq:\t{seq}')
 
-        sw = LocalAlignment(IdentityScoringMatrix())
-        sw.align(seq, ref).dump()
+        aligner.align(seq, ref).dump()
 
     return alignments
 
@@ -190,66 +190,50 @@ def get_confusion_matrices():
 def fit_curve(hps):
 
     # merge complement bps and convert cm to percentages
-    at_hps = hps[cfg.bases['A']] + hps[cfg.bases['T']]
-    gc_hps = hps[cfg.bases['G']] + hps[cfg.bases['C']]
-    at_pct = (at_hps+0.00001) / (1 + np.sum(at_hps, axis=1))[:, np.newaxis]
-    gc_pct = (gc_hps+0.00001) / (1 + np.sum(gc_hps, axis=1))[:, np.newaxis]
+    hps = hps.sum(axis=0)
+    pct = (hps+0.00001) / (1 + np.sum(hps, axis=1))[:, np.newaxis]
 
     # 0: PERCENT HP CORRECT
     # plot percentage correctness (by hp length)
     fig, ax = plt.subplots(3, 1, figsize=(15,25))
-    hp_lens = range(1, 15) # at most max_hp-1
-    at_pct_correct = [at_pct[i,i] for i in hp_lens]
-    gc_pct_correct = [gc_pct[i,i] for i in hp_lens]
-    ax[0].plot(hp_lens, at_pct_correct, color='red', linestyle='', marker='o', alpha=0.5)
-    ax[0].plot(hp_lens, gc_pct_correct, color='blue', linestyle='', marker='o', alpha=0.5)
+    hp_lens = range(1, 81) # at most max_hp-1
+    all_hp_lens = range(cfg.args.max_hp)
+    pct_correct = [pct[i,i] for i in hp_lens]
+    ax[0].plot(hp_lens, pct_correct, color='green', linestyle='', marker='o', alpha=0.5)
     ax[0].set_xlabel('Actual Homopolymer Length')
-    ax[0].set_ylabel('Percent Correct')
-    ax[0].legend(['AT', 'GC'])
+    ax[0].set_ylabel('Log Percent Correct')
 
     # show polynomial fit
-    at_b_cor, at_m_cor = polyfit(hp_lens, np.log(at_pct_correct), 1)
-    gc_b_cor, gc_m_cor = polyfit(hp_lens, np.log(gc_pct_correct), 1)
-    # ax[0].plot(hp_lens, np.exp(at_m_cor*hp_lens + at_b_cor), color='k', linestyle=':', alpha=0.5)
-    # ax[0].plot(hp_lens, np.exp(gc_m_cor*hp_lens + gc_b_cor), color='k', linestyle=':', alpha=0.5)
+    pct_cor_coeff = np.polyfit(hp_lens, pct_correct, 3)
+    pct_cor_fit = np.poly1d(pct_cor_coeff)
+    ax[0].plot(all_hp_lens, pct_cor_fit(all_hp_lens), color='k', linestyle=':', alpha=0.5)
 
     # 1: HP LENGTH MEAN
     # overwrite correct hp length (by interpolating), for separate distribution
     for l in hp_lens:
-        at_pct[l,l] = (at_pct[l,l-1] + at_pct[l,l+1]) / 2
-        gc_pct[l,l] = (gc_pct[l,l-1] + gc_pct[l,l+1]) / 2
+        pct[l,l] = (pct[l,l-1] + pct[l,l+1]) / 2
 
     # estimate gaussian distributions for hp lengths
-    at_means = [np.dot(at_pct[l], np.array(range(cfg.args.max_hp))) for l in hp_lens]
-    gc_means = [np.dot(gc_pct[l], np.array(range(cfg.args.max_hp))) for l in hp_lens]
-    ax[1].plot(hp_lens, at_means, color='red', linestyle='', marker='o', alpha=0.5)
-    ax[1].plot(hp_lens, gc_means, color='blue', linestyle='', marker='o', alpha=0.5)
-    at_b_mean, at_m_mean = polyfit(hp_lens, at_means, 1)
-    gc_b_mean, gc_m_mean = polyfit(hp_lens, gc_means, 1)
-    ax[1].plot(hp_lens, at_m_mean*hp_lens + at_b_mean, color='k', linestyle=':', alpha=0.5)
-    ax[1].plot(hp_lens, gc_m_mean*hp_lens + gc_b_mean, color='k', linestyle=':', alpha=0.5)
+    means = [np.dot(pct[l], np.array(range(cfg.args.max_hp))) for l in hp_lens]
+    ax[1].plot(hp_lens, means, color='b', linestyle='', marker='o', alpha=0.5)
+    mean_coeff = np.polyfit(hp_lens, means, 2)
+    mean_fit = np.poly1d(mean_coeff)
+    ax[1].plot(all_hp_lens, mean_fit(all_hp_lens), color='k', linestyle=':', alpha=0.5)
+    ax[1].plot(all_hp_lens, all_hp_lens, color='r', linestyle='--', alpha=0.5)
     ax[1].set_xlabel('Actual Homopolymer Length')
     ax[1].set_ylabel('Mean Length Called')
 
     # 2: HP LENGTH STDDEV
-    at_stds = []
+    stds = []
     for l in hp_lens:
         vals = []
         for i in range(cfg.args.max_hp):
-            vals.extend(int(1000*at_pct[l,i])*[i])
-        at_stds.append(np.std(vals))
-    gc_stds = []
-    for l in hp_lens:
-        vals = []
-        for i in range(cfg.args.max_hp):
-            vals.extend(int(1000*gc_pct[l,i])*[i])
-        gc_stds.append(np.std(vals))
-    ax[2].plot(hp_lens, at_stds, color='red', linestyle='', marker='o', alpha=0.5)
-    ax[2].plot(hp_lens, gc_stds, color='blue', linestyle='', marker='o', alpha=0.5)
-    at_b_std, at_m_std = polyfit(hp_lens, at_stds, 1)
-    gc_b_std, gc_m_std = polyfit(hp_lens, gc_stds, 1)
-    ax[2].plot(hp_lens, at_m_std*hp_lens + at_b_std, color='k', linestyle=':', alpha=0.5)
-    ax[2].plot(hp_lens, gc_m_std*hp_lens + gc_b_std, color='k', linestyle=':', alpha=0.5)
+            vals.extend(int(1000*pct[l,i])*[i])
+        stds.append(np.std(vals))
+    ax[2].plot(hp_lens, stds, color='g', linestyle='', marker='o', alpha=0.5)
+    std_coeff = np.polyfit(hp_lens, stds, 3)
+    std_fit = np.poly1d(std_coeff)
+    ax[2].plot(all_hp_lens, std_fit(all_hp_lens), color='k', linestyle=':', alpha=0.5)
     ax[2].set_xlabel('Actual Homopolymer Length')
     ax[2].set_ylabel('Standard Deviation of Length Called')
 
@@ -259,14 +243,12 @@ def fit_curve(hps):
 
 
 def plot_dists(hps):
-    colors = ['red', 'blue', 'orange', 'green']
+    hps = np.sum(hps, axis=0)
     for l in range(cfg.args.max_hp):
         fig, ax = plt.subplots(1, 1, figsize=(10,10))
-        for base, base_idx in cfg.bases.items():
-            hp_lens = hps[base_idx, l, :] / (1 + np.sum(hps[base_idx, l, :]))
-            ax.step(range(cfg.args.max_hp), hp_lens, alpha=0.5, color=colors[base_idx])
+        hp_lens = hps[l, :] / (1 + np.sum(hps[l, :]))
+        ax.step(range(cfg.args.max_hp), hp_lens, alpha=0.5, color='r')
         ax.set_title(str(l))
-        ax.legend(list(cfg.bases.keys()))
         plt.tight_layout()
         plt.savefig(f'{cfg.args.stats_dir}/hp{l}_dist.png', dpi=200)
         plt.close()
