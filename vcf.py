@@ -15,7 +15,7 @@ def get_positions(vcf_filename: str, min_qual: int, window: int):
     last_pos = 0
     pos = []
     for p in all_pos:
-        if p >= last_pos + 2*window:
+        if p > last_pos + 2*window:
             pos.append(p)
             last_pos = p
     return pos

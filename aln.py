@@ -108,7 +108,8 @@ def get_hp_lengths(seq):
             if seq[stop] != seq[start]:
                 hp_lens[start] = stop - start
                 break
-    hp_lens[-1] += 1
+    if len(seq):
+        hp_lens[-1] += 1
     return hp_lens
 
 

@@ -5,7 +5,12 @@ args = None
 
 # counter (for in-progress printing)
 pos_count = mp.Value('i', 0)
+read_count = mp.Value('i', 0)
+results_count = mp.Value('i', 0)
 
 # global enum for bases ACGT
 bases = {'A': 0, 'C': 1, 'G': 2, 'T': 3}
+
+# convert Cigar to string
+cigar = 'MIDNSHP=XB'
 

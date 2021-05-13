@@ -3,7 +3,7 @@ from collections import defaultdict
 import numpy as np
 from numpy.polynomial.polynomial import polyfit
 import matplotlib.pyplot as plt
-import os
+import os, re, itertools
 
 import pysam
 
@@ -30,11 +30,91 @@ def realign_bam(positions):
     Wrapper for multi-threaded read re-alignment at each BAM position.
     '''
     
-    # with mp.Pool() as pool:
-    #     read_alignments = pool.map(realign_pos, positions)
+    # calculate all realignments for specified positions
+    print('    > computing subread realignments')
+    cfg.pos_count.value = 0
+    with mp.Pool() as pool:
+        subread_alignments = pool.map(realign_pos, positions)
+    subread_alignments = list(itertools.chain(*subread_alignments))
 
-    read_alignments = realign_pos(positions[0])
+    # store results in dict, grouped by read
+    print('\n    > sorting subread realignments by read')
+    read_alignments = defaultdict(list)
+    for read, pos, cigar, read_start, cigartuples in subread_alignments:
+        read_alignments[read].append((pos, cigar, read_start, cigartuples))
+    print(f'    {len(read_alignments)} reads found.')
+
+    # update per-read CIGAR strings in parallel
+    print('    > splicing together realignments')
+    with mp.Pool() as pool:
+        read_alignments = pool.map(splice_realignments, 
+                list(read_alignments.items()))
+
+    return read_alignments
+
+
     
+def splice_realignments(read_data):
+    '''
+    Given ('read_id', [(pos1, cigar1), (pos2, cigar2)...]), return
+    the full alignment with a modified CIGAR string.
+    '''
+
+    # extract useful read data
+    read_id, subread_data = read_data
+    read_start = subread_data[0][2]
+    cigartuples = subread_data[0][3]
+    cigar_types = [ c[0] for c in cigartuples ]
+    cigar_counts = [ c[1] for c in cigartuples ]
+    ref_idx = read_start
+    cigar = ''
+
+    for pos, subcigar, _, _ in subread_data:
+        ref_start = pos - cfg.args.window
+        ref_end = pos + cfg.args.window
+
+        while ref_idx < ref_end and cigar_types:
+
+            # store cigar prefix
+            if ref_idx < ref_start:
+                cigar += cfg.cigar[cigar_types[0]]
+
+            # determine whether to move on read/ref
+            if cigar_types[0] == Cigar.S:    # soft-clipped
+                pass
+            elif cigar_types[0] == Cigar.H:    # hard-clipped
+                pass
+            elif cigar_types[0] == Cigar.X:    # substitution
+                ref_idx += 1
+            elif cigar_types[0] == Cigar.I:    # insertion
+                pass
+            elif cigar_types[0] == Cigar.D:    # deletion
+                ref_idx += 1
+            elif cigar_types[0] == Cigar.E:    # match
+                ref_idx += 1
+            elif cigar_types[0] == Cigar.M:    # match/sub
+                ref_idx += 1
+            else:
+                print(f"ERROR: unexpected CIGAR type for {read.query_name}")
+                exit(1)
+
+            # move to next CIGAR section of interest
+            cigar_counts[0] -= 1
+            if cigar_counts[0] == 0:
+                del cigar_types[0]
+                del cigar_counts[0]
+
+        # add cigar from this subsection of read
+        cigar += subcigar
+
+    cigar += extend_pysam_cigar(cigar_types, cigar_counts)
+    cigar = collapse_cigar(cigar)
+    with cfg.read_count.get_lock():
+        cfg.read_count.value += 1
+        print(f"\r    {cfg.read_count.value} reads processed.", end='', flush=True)
+
+    return (read_id, cigar)
+
 
 
 def realign_pos(pos):
@@ -43,12 +123,11 @@ def realign_pos(pos):
     '''
 
     aligner = Aligner(cfg.args.sub_scores, cfg.args.hp_scores)
-    alignments = defaultdict(list)
+    alignments = []
     bam = pysam.AlignmentFile(cfg.args.bam, 'rb')
 
     ref_start = pos-cfg.args.window
     ref_end = pos+cfg.args.window
-    print(f'pos {pos}: {ref_start}-{ref_end}')
 
     for read in bam.fetch(cfg.args.contig, pos, pos+1):
 
@@ -62,58 +141,44 @@ def realign_pos(pos):
         cigar_counts = [ c[1] for c in read.cigartuples ]
         read_idx, ref_idx = 0, read.reference_start
         read_start, read_end, first = None, None, True
+        pre_cigar = ''
 
         while ref_idx < ref_end:
+            cigar = cigar_types[0]
 
             # first read position overlapping region
             if first and ref_idx >= ref_start:
                 first = False
                 read_start = read_idx
 
-            read_move, ref_move = None, None
-            cigar = cigar_types[0]
+            # store cigar prefix
+            if ref_idx < ref_start:
+                pre_cigar += cfg.cigar[cigar]
 
             # determine whether to move on read/ref
             if cigar == Cigar.S:    # soft-clipped
-                read_move = True
-                ref_move = False
+                read_idx += 1
             elif cigar == Cigar.H:    # hard-clipped
-                read_move = False
-                ref_move = False
+                pass
             elif cigar == Cigar.X:    # substitution
-                read_move = True
-                ref_move = True
+                read_idx += 1
+                ref_idx += 1
             elif cigar == Cigar.I:    # insertion
-                read_move = True
-                ref_move = False
+                read_idx += 1
             elif cigar == Cigar.D:    # deletion
-                read_move = False
-                ref_move = True
+                ref_idx += 1
             elif cigar == Cigar.E:    # match
-                read_move = True
-                ref_move = True
+                read_idx += 1
+                ref_idx += 1
             elif cigar == Cigar.M:    # match/sub
-                read_move = True
-                ref_move = True
+                read_idx += 1
+                ref_idx += 1
             else:
                 print(f"ERROR: unexpected CIGAR type for {read.query_name}")
                 exit(1)
 
-            # shift reference index by one base or deleted section
-            if ref_move:
-                if read_move:
-                    ref_idx += 1
-                else:
-                    ref_idx += cigar_counts[0]
-
-            # shift read index
-            if read_move:
-                cigar_counts[0] -= 1
-                read_idx += 1
-            else:
-                cigar_counts[0] = 0
-
             # move to next CIGAR section of interest
+            cigar_counts[0] -= 1
             if cigar_counts[0] == 0:
                 del cigar_counts[0]
                 del cigar_types[0]
@@ -121,32 +186,113 @@ def realign_pos(pos):
         # extract read section
         read_end = read_idx
         seq = read.query_sequence[read_start:read_end]
-        print(f'\nref:\t{ref}')
-        print(f'seq:\t{seq}')
 
-        aligner.align(seq, ref).dump()
+        alignment = aligner.align(ref, seq)
+        this_cigar = extend_cigar_str(alignment.extended_cigar_str)
+        alignments.append((read.query_name, pos, this_cigar, read.reference_start, read.cigartuples))
+
+    with cfg.pos_count.get_lock():
+        cfg.pos_count.value += 1
+        print(f"\r    {cfg.pos_count.value} positions processed.", end='', flush=True)
+
 
     return alignments
 
 
+def read_len(extended_cigar):
+    length = 0
+    for op in extended_cigar:
+        if op in 'SXI=M':
+            length += 1
+    return length
 
-def write_bam(fname, alignments, header, bam=True):
+def ref_len(extended_cigar):
+    length = 0
+    for op in extended_cigar:
+        if op in 'XD=M':
+            length += 1
+    return length
+
+
+
+def extend_cigar_str(cig):
+    groups = re.findall(r"(?P<len>\d+)(?P<op>\D+)", cig)
+    return ''.join([int(count)*op for (count, op) in groups])
+
+
+def extend_pysam_cigar(ops, counts):
+    return ''.join([int(count)*cfg.cigar[op] for (count, op) in zip(counts, ops)])
+
+
+def collapse_cigar(extended_cigar):
+    count = 1
+    last = None
+    groups = []
+    for op in extended_cigar:
+        if last and op == last:
+            count += 1
+        elif last:
+            groups.append((count, last))
+            count = 1
+        last = op
+
+    if last:
+        groups.append((count, last))
+
+    out = ''
+    for num, op in groups:
+        out += '%s%s' % (num, op)
+    return out
+
+
+
+def write_results(alignments, outfile):
     '''
     Write a `.bam` file for a set of alignments.
     '''
-    with pysam.AlignmentFile(fname, 'wb', header=header) as fh:
-        for ref_id, subreads in enumerate(alignments):
-            for aln in sorted(subreads, key=lambda x: x.rstart):
-                a = pysam.AlignedSegment()
-                a.reference_id = ref_id
-                a.query_name = aln.qname
-                a.query_sequence = aln.seq
-                a.reference_start = aln.rstart
-                a.cigarstring = aln.cigar
-                a.flag = aln.flag
-                a.mapping_quality = 60
-                fh.write(a)
-    pysam.index(fname) 
+    print("    > creating BAM index")
+    bam = pysam.AlignmentFile(cfg.args.bam, 'rb')
+    bam_index = pysam.IndexedReads(bam)
+    bam_index.build()
+
+    print("    > writing results")
+    contig_idx = list(bam.references).index(cfg.args.contig)
+    contig_len = bam.lengths[contig_idx]
+    header = { 'HD': {'VN': '1.0'},
+               'SQ': [{'LN': contig_len, 'SN': cfg.args.contig}]
+             }
+    with pysam.Samfile(outfile, 'wb', header=header) as fh:
+
+        for read_id, cigar in alignments:
+
+            # find corresponding read in original BAM
+            try:
+                aln_itr = bam_index.find(read_id)
+                old_alignment = next(aln_itr)
+            except (KeyError, StopIteration) as e:
+                print(f"ERROR: could not find read {read_id} in BAM file '{cfg.args.bam}'.")
+                exit(1)
+
+            # overwrite CIGAR string
+            new_alignment = pysam.AlignedSegment()
+            new_alignment.query_name      = old_alignment.query_name
+            new_alignment.query_sequence  = old_alignment.query_sequence
+            new_alignment.flag            = old_alignment.flag
+            new_alignment.reference_start = old_alignment.reference_start
+            new_alignment.mapping_quality = old_alignment.mapping_quality
+            new_alignment.query_qualities = old_alignment.query_qualities
+            new_alignment.tags            = old_alignment.tags
+            new_alignment.reference_id    = 0
+            new_alignment.cigarstring     = cigar
+            fh.write(new_alignment)
+
+            # print progress
+            with cfg.results_count.get_lock():
+                cfg.results_count.value += 1
+                print(f"\r{cfg.results_count.value} of {len(alignments)} alignments written.", end='', flush=True)
+
+    pysam.index(outfile)
+    return
 
 
 

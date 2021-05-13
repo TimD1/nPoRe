@@ -33,6 +33,7 @@ def argparser():
 
     parser.add_argument("--stats_dir", default="./stats")
 
+    parser.add_argument("--plot", action="store_true")
     parser.add_argument("--force", action="store_true")
 
     return parser
@@ -41,31 +42,36 @@ def argparser():
 
 def main():
 
-    print("> calculating BAM statistics")
     os.makedirs(cfg.args.stats_dir, exist_ok=True)
     subs, hps = get_confusion_matrices()
 
-    # print("\n> plotting confusion matrices")
-    # # plot_confusion_matrices(subs, hps)
-    # print("\n> plotting distributions")
-    # plot_dists(hps)
-    # print("\n> plotting parameter fitting")
-    # fit_curve(hps)
+    if cfg.args.plot:
+        print("\n> plotting confusion matrices")
+        plot_confusion_matrices(subs, hps)
 
-    print("> calculating SUB / INDEL score matrices")
+        print("\n> plotting distributions")
+        plot_dists(hps)
+
+        print("\n> plotting parameter fitting")
+        fit_curve(hps)
+
+    print("\n> calculating score matrices")
     cfg.args.sub_scores, cfg.args.hp_scores = calc_score_matrices(subs, hps)
 
-    print("> plotting score matrices")
-    plot_hp_score_matrix(cfg.args.hp_scores)
+    if cfg.args.plot:
+        print("> plotting score matrices")
+        plot_hp_score_matrix(cfg.args.hp_scores)
 
-    print("> getting DeepVariant positions")
+    print("\n> getting DeepVariant positions")
     positions = get_positions(cfg.args.vcf, cfg.args.min_qual, cfg.args.window)
+    print(f"{len(positions)} positions found.")
 
-    print("> computing realignments")
+    print("\n> computing BAM realignments")
     alignments = realign_bam(positions)
 
-    # print("> saving results")
-    # write_results(alignments, bam, args.out)
+    print(f"\n\n> saving results to '{cfg.args.out}'")
+    write_results(alignments, cfg.args.out)
+    print("\n\n")
 
 
 
