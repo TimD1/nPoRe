@@ -3,7 +3,7 @@ from collections import defaultdict
 import numpy as np
 from numpy.polynomial.polynomial import polyfit
 import matplotlib.pyplot as plt
-import os, re, itertools
+import os, re, itertools, sys
 
 import pysam
 
@@ -25,23 +25,41 @@ class Cigar():
 
 
 
+def get_cigars(bam):
+
+    cigars = dict()
+    starts = dict()
+    bam = pysam.AlignmentFile(cfg.args.bam, 'rb')
+
+    for read in bam.fetch():
+        cigars[read.query_name] = read.cigartuples
+        starts[read.query_name] = read.reference_start
+
+    return cigars, starts
+
+
+
 def realign_bam(positions):
     '''
     Wrapper for multi-threaded read re-alignment at each BAM position.
     '''
+
+    print('    > getting all CIGAR strings')
+    cfg.cigars, cfg.starts = get_cigars(cfg.args.bam)
     
     # calculate all realignments for specified positions
     print('    > computing subread realignments')
     cfg.pos_count.value = 0
     with mp.Pool() as pool:
-        subread_alignments = pool.map(realign_pos, positions)
+        print(positions[:1])
+        subread_alignments = pool.map(realign_pos, positions[:1])
     subread_alignments = list(itertools.chain(*subread_alignments))
 
     # store results in dict, grouped by read
     print('\n    > sorting subread realignments by read')
     read_alignments = defaultdict(list)
-    for read, pos, cigar, read_start, cigartuples in subread_alignments:
-        read_alignments[read].append((pos, cigar, read_start, cigartuples))
+    for read, pos, cigar in subread_alignments:
+        read_alignments[read].append((pos, cigar))
     print(f'    {len(read_alignments)} reads found.')
 
     # update per-read CIGAR strings in parallel
@@ -62,14 +80,14 @@ def splice_realignments(read_data):
 
     # extract useful read data
     read_id, subread_data = read_data
-    read_start = subread_data[0][2]
-    cigartuples = subread_data[0][3]
+    read_start = cfg.starts[read_id]
+    cigartuples = cfg.cigars[read_id]
     cigar_types = [ c[0] for c in cigartuples ]
     cigar_counts = [ c[1] for c in cigartuples ]
     ref_idx = read_start
     cigar = ''
 
-    for pos, subcigar, _, _ in subread_data:
+    for pos, subcigar in subread_data:
         ref_start = pos - cfg.args.window
         ref_end = pos + cfg.args.window
 
@@ -188,8 +206,9 @@ def realign_pos(pos):
         seq = read.query_sequence[read_start:read_end]
 
         alignment = aligner.align(ref, seq)
+        alignment.dump()
         this_cigar = extend_cigar_str(alignment.extended_cigar_str)
-        alignments.append((read.query_name, pos, this_cigar, read.reference_start, read.cigartuples))
+        alignments.append((read.query_name, pos, this_cigar))
 
     with cfg.pos_count.get_lock():
         cfg.pos_count.value += 1
@@ -256,10 +275,19 @@ def write_results(alignments, outfile):
     bam_index.build()
 
     print("    > writing results")
-    contig_idx = list(bam.references).index(cfg.args.contig)
-    contig_len = bam.lengths[contig_idx]
-    header = { 'HD': {'VN': '1.0'},
-               'SQ': [{'LN': contig_len, 'SN': cfg.args.contig}]
+    header = { 'HD': {
+                   'VN': '1.6', 
+                   'SO': 'coordinate'
+               },
+               'SQ': [{'LN': l, 'SN': ctg} for l, ctg in \
+                       zip(bam.lengths, bam.references) if \
+                       re.match("^chr[0-9A-Za-z][0-9a-zA-Z]?$", ctg)],
+               'PG': [{
+                   'PN': 'realigner',
+                   'ID': 'realigner',
+                   'VN': cfg.__version__,
+                   'CL': ' '.join(sys.argv)
+               }]
              }
     with pysam.Samfile(outfile, 'wb', header=header) as fh:
 
@@ -282,16 +310,18 @@ def write_results(alignments, outfile):
             new_alignment.mapping_quality = old_alignment.mapping_quality
             new_alignment.query_qualities = old_alignment.query_qualities
             new_alignment.tags            = old_alignment.tags
-            new_alignment.reference_id    = 0
+            if new_alignment.has_tag('MD'):
+                new_alignment.set_tag('MD', None)
+            new_alignment.reference_id    = list([ctg for ctg in bam.references \
+                    if re.match("^chr[0-9A-Za-z][0-9a-zA-Z]?$", ctg)]).index(cfg.args.contig)
             new_alignment.cigarstring     = cigar
             fh.write(new_alignment)
 
             # print progress
             with cfg.results_count.get_lock():
                 cfg.results_count.value += 1
-                print(f"\r{cfg.results_count.value} of {len(alignments)} alignments written.", end='', flush=True)
+                print(f"\r    {cfg.results_count.value} of {len(alignments)} alignments written.", end='', flush=True)
 
-    pysam.index(outfile)
     return
 
 
@@ -398,6 +428,21 @@ def plot_dists(hps):
         plt.tight_layout()
         plt.savefig(f'{cfg.args.stats_dir}/hp{l}_dist.png', dpi=200)
         plt.close()
+
+
+
+def show_scores(hp_scores):
+    max_hp = 20
+    plt.figure(figsize=(15,15))
+    plt.matshow(hp_scores[:max_hp,:max_hp], cmap=plt.cm.Reds, alpha=0.5)
+    for i in range(max_hp):
+        for j in range(max_hp):
+            plt.text(x=j, y=i, s=f'{hp_scores[j,i]:.1f}', fontsize=7, va='center', ha='center')
+    plt.xlabel('Predicted')
+    plt.ylabel('Actual')
+    plt.title('Homopolymer Score Matrix')
+    plt.savefig(f'{cfg.args.stats_dir}/hp_scores.png', dpi=300)
+    plt.close()
 
 
 

@@ -6,7 +6,7 @@ import pysam
 
 import cfg
 from vcf import get_positions
-from aln import calc_score_matrices
+from aln import *
 from bam import *
 
 
@@ -58,9 +58,17 @@ def main():
     print("\n> calculating score matrices")
     cfg.args.sub_scores, cfg.args.hp_scores = calc_score_matrices(subs, hps)
 
+    # aligner = Aligner(cfg.args.sub_scores, cfg.args.hp_scores, verbose=True)
+    # ref = "ATTTTTTTCTAATTTTTATTTATTTAAAAAAAATTTTTTGAGACGG"
+    # seq = "ATTTTTTCTAATTTTTATTTATTTAAAAATTTTTTGAGACGGGGTC"
+    # alignment = aligner.align(ref, seq)
+    # alignment.dump()
+    # exit(0)
+
     if cfg.args.plot:
         print("> plotting score matrices")
         plot_hp_score_matrix(cfg.args.hp_scores)
+        show_scores(cfg.args.hp_scores)
 
     print("\n> getting DeepVariant positions")
     positions = get_positions(cfg.args.vcf, cfg.args.min_qual, cfg.args.window)
@@ -71,7 +79,7 @@ def main():
 
     print(f"\n\n> saving results to '{cfg.args.out}'")
     write_results(alignments, cfg.args.out)
-    print("\n\n")
+    print("\n")
 
 
 

@@ -5,20 +5,22 @@ Simple Smith-Waterman aligner
 import sys
 import numpy as np
 import matplotlib.pyplot as plt
+from mpl_toolkits import mplot3d
+import scipy.ndimage as ndimage
 import cfg
 
 
-def smooth_matrix(scores, delta = 0.01):
+def fix_matrix_properties(scores, delta = 0.01):
     ''' Modify matrix so scores follow expected pattern. '''
 
     # don't penalize diagonals
     l = scores.shape[0]
-    for i in range(l):
-        scores[i, i] = 0
+    for i in range(1, l):
+        scores[i,i] = min(scores[i,i], scores[i-1, i-1])
 
     # more insertions should be more penalized
-    for i in reversed(range(l-1)):
-        for j in range(i+1, l):
+    for j in range(1, l):
+        for i in reversed(range(0, j)):
             scores[i,j] = max(
                     scores[i,j], 
                     scores[i+1,j] + delta, 
@@ -33,16 +35,41 @@ def smooth_matrix(scores, delta = 0.01):
                     scores[i,j+1] + delta, 
                     scores[i-1,j] + delta
             )
-            # print(f'({i},{j}) ', end='')
-        # print(' ')
 
-    # prefer indels from longer homopolymers
-    for i in range(1,l):
-        for j in range(1,l):
-            if i != j:
+    # prefer insertions from longer homopolymers
+    best = np.ones(l) * 1000
+    for j in range(1,l):
+        for i in reversed(range(0,j)):
+            ins_len = j - i
+            if scores[i,j] < best[ins_len]:
+                best[ins_len] = scores[i,j]
+                for total_ins_len in range(ins_len+1, l):
+                    best[total_ins_len] = min(
+                            best[total_ins_len], 
+                            best[ins_len] + best[total_ins_len-ins_len]
+                    )
+            else:
                 scores[i,j] = min(
-                        scores[i,j], 
-                        scores[i-1,j-1] - delta
+                        scores[i, j], 
+                        best[ins_len] - delta
+                )
+
+    # prefer deletions from longer homopolymers
+    best = np.ones(l) * 1000
+    for i in range(1,l):
+        for j in reversed(range(0,i)):
+            del_len = i - j
+            if scores[i,j] < best[del_len]:
+                best[del_len] = scores[i,j]
+                for total_del_len in range(del_len+1, l):
+                    best[total_del_len] = min(
+                            best[total_del_len], 
+                            best[del_len] + best[total_del_len-del_len]
+                    )
+            else:
+                scores[i,j] = min(
+                        scores[i, j], 
+                        best[del_len] - delta
                 )
 
     return scores
@@ -58,27 +85,43 @@ def calc_score_matrices(subs, hps):
         for call_len in range(cfg.args.max_hp):
             count = int(hps[ref_len, call_len])
             bias = 10
-            frac = (count + 0.1 + int(ref_len==call_len)*bias) / (total + 0.1*cfg.args.max_hp + bias)
+            frac = (count + 0.01 + int(ref_len==call_len)*bias) / (total + 0.01*cfg.args.max_hp + bias)
             hp_scores[ref_len, call_len] = -np.log(frac)
-    hp_scores = smooth_matrix(hp_scores)
+    # hp_scores = ndimage.gaussian_filter(hp_scores, sigma=(2,2))
+    hp_scores = fix_matrix_properties(hp_scores)
 
     # calculate substitution scores matrix
     sub_scores = np.zeros_like(subs)
     for i in range(len(cfg.bases)):
         total = np.sum(subs[i])
         for j in range(len(cfg.bases)):
-            sub_scores[i, j] = -np.log( (subs[i,j]+0.1) / total )
+            if i != j:
+                sub_scores[i, j] = -np.log( (subs[i,j]+0.1) / total )
+            else:
+                sub_scores[i, j] = 0
 
     return sub_scores, hp_scores
 
 
-def plot_hp_score_matrix(hps):
+def plot_hp_score_matrix(hps, prefix="score_mat"):
+
+    # surface plot
+    x, y = np.meshgrid(range(cfg.args.max_hp), range(cfg.args.max_hp))
+    fig = plt.figure(figsize=(20,10))
+    ax1 = fig.add_subplot(1,2,1, projection='3d')
+    ax2 = fig.add_subplot(1,2,2, projection='3d')
+    ax1.plot_trisurf(x.flatten(), -y.flatten(), hps.flatten(), cmap='RdYlGn_r', edgecolor='none')
+    ax2.plot_trisurf(-x.flatten(), -y.flatten(), hps.flatten(), cmap='RdYlGn_r', edgecolor='none')
+    plt.tight_layout()
+    plt.savefig(f'{cfg.args.stats_dir}/{prefix}_surface.png', dpi=200)
+
+    # contour plot
     plt.figure(figsize=(15,15))
     plot = plt.contour(hps, levels=10)
     plt.xlabel('Homopolymer Length Called')
     plt.ylabel('Actual Homopolymer Length')
     plt.tight_layout()
-    plt.savefig(f'{cfg.args.stats_dir}/score_mat.png', dpi=200)
+    plt.savefig(f'{cfg.args.stats_dir}/{prefix}_contour.png', dpi=200)
 
 
 
@@ -95,7 +138,6 @@ class Matrix(object):
 
     def set(self, row, col, val):
         self.values[(row * self.cols) + col] = val
-
 
 
 def get_hp_lengths(seq):
@@ -126,9 +168,16 @@ class Aligner(object):
 
 
     def hp_indel_score(self, ref_hp_len, indel_len):
-        if ref_hp_len >= cfg.args.max_hp:
-            ref_hp_len = cfg.args.max_hp-1
-        call_hp_len = min(max(0, ref_hp_len+indel_len), cfg.args.max_hp-1)
+
+        # error, don't allow
+        if ref_hp_len <= 0:
+            return 100
+        elif ref_hp_len + indel_len < 0:
+            return 100
+
+        # force lengths to fit in matrix
+        ref_hp_len = min(ref_hp_len, cfg.args.max_hp-1)
+        call_hp_len = min(ref_hp_len+indel_len, cfg.args.max_hp-1)
         return self.hp_scores[ref_hp_len, call_hp_len]
 
 
@@ -189,10 +238,16 @@ class Aligner(object):
                 lhp_run = 1
                 if query_idx+2 < len(query) and ref_idx+1 < len(ref) and \
                         query[query_idx+1] == query[query_idx+2]: # only insert same base
-                    if matrix.get(row-1, col)[TYPE] == 'L': # continue run
+                    if query[query_idx+1] != query[query_idx]: # start run
+                        lhp_run = 1
+                        lhp_val = matrix.get(row-lhp_run, col)[VALUE] + \
+                                self.hp_indel_score(ref_hp_lens[ref_idx+1], lhp_run)
+                    elif matrix.get(row-1, col)[TYPE] == 'L': # continue run
                         lhp_run = matrix.get(row-1, col)[RUNLEN] + 1
-                    lhp_val = matrix.get(row-lhp_run, col)[VALUE] + \
-                            self.hp_indel_score(ref_hp_lens[ref_idx+1], lhp_run)
+                        lhp_val = matrix.get(row-lhp_run, col)[VALUE] + \
+                                self.hp_indel_score(ref_hp_lens[ref_idx+1], lhp_run)
+                    else: # don't allow mid-HP insertion
+                        lhp_val = matrix.get(row-1, col)[VALUE] + 100
                 else: # don't allow insertion of different base
                     lhp_val = matrix.get(row-1, col)[VALUE] + 100
 
@@ -200,11 +255,18 @@ class Aligner(object):
                 shp_run = 1
                 if ref_idx+1 < len(ref) and \
                         ref[ref_idx+1] == ref[ref_idx]: # only delete same base
-                    if matrix.get(row, col-1)[TYPE] == 'S': # continue run
+                    if ref_idx and ref[ref_idx] != ref[ref_idx-1]: # start run
+                        shp_run = 1
+                        shp_val = matrix.get(row, col-shp_run)[VALUE] + \
+                                self.hp_indel_score(ref_hp_lens[ref_idx], -shp_run)
+                    elif matrix.get(row, col-1)[TYPE] == 'S': # continue run
                         shp_run = matrix.get(row, col-1)[RUNLEN] + 1
-                    shp_val = matrix.get(row, col-shp_run)[VALUE] + \
-                            self.hp_indel_score(ref_hp_lens[ref_idx], -shp_run)
-                else: # don't allow insertion of different base
+                        shp_val = matrix.get(row, col-shp_run)[VALUE] + \
+                                self.hp_indel_score(ref_hp_lens[ref_idx], -shp_run)
+                    else: # don't allow mid-HP deletion
+                        shp_val = matrix.get(row, col-1)[VALUE] + 100
+
+                else: # don't allow deleting different base
                     shp_val = matrix.get(row, col-1)[VALUE] + 100
 
                 # determine optimal alignment for this cell
@@ -266,8 +328,8 @@ class Aligner(object):
 
     def dump_matrix(self, ref, query, matrix, path, show_row=-1, show_col=-1):
         ''' Pretty print alignment matrix. '''
-        sys.stdout.write('      -      ')
-        sys.stdout.write('       '.join(ref))
+        sys.stdout.write('   -     ')
+        sys.stdout.write('    '.join(ref))
         sys.stdout.write('\n')
         for row in range(matrix.rows):
             if row == 0:
@@ -279,8 +341,8 @@ class Aligner(object):
                 if show_row == row and show_col == col:
                     sys.stdout.write('       *')
                 else:
-                    sys.stdout.write(' %5s%s%s' % 
-                            (matrix.get(row, col)[0], matrix.get(row, col)[1], 
+                    sys.stdout.write(' %2d%s%s' % 
+                            (int(matrix.get(row, col)[0]), matrix.get(row, col)[1], 
                                 '$' if (row, col) in path else ' '))
             sys.stdout.write('\n')
 
