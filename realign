@@ -7,3 +7,4 @@ REF="$DIR/ref/GCA_000001405.15_GRCh38_no_alt_analysis_set.fasta"
 VCF="$DIR/$BC/deep_variant/intermediate_files/PEPPER_HP_OUPUT.vcf.gz"
 
 python3 realign.py $BAM $REF $VCF realigned.bam
+~/NanoporeScripts/align realigned.bam $REF

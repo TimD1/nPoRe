@@ -9,35 +9,7 @@ import pysam
 
 import cfg
 from aln import *
-
-class Cigar():
-    ''' Enum for pysam's cigartuples encoding.  '''
-    M = 0
-    I = 1
-    D = 2
-    N = 3
-    S = 4
-    H = 5
-    P = 6
-    E = 7
-    X = 8
-    B = 9
-
-
-
-def get_cigars(bam):
-
-    cigars = dict()
-    starts = dict()
-    bam = pysam.AlignmentFile(cfg.args.bam, 'rb')
-
-    for read in bam.fetch():
-        cigars[read.query_name] = read.cigartuples
-        starts[read.query_name] = read.reference_start
-
-    return cigars, starts
-
-
+from cig import *
 
 def realign_bam(positions):
     '''
@@ -51,7 +23,7 @@ def realign_bam(positions):
     print('    > computing subread realignments')
     cfg.pos_count.value = 0
     with mp.Pool() as pool:
-        subread_alignments = pool.map(realign_pos, positions)
+        subread_alignments = pool.map(realign_pos, positions[:10])
     subread_alignments = list(itertools.chain(*subread_alignments))
 
     # store results in dict, grouped by read
@@ -139,7 +111,6 @@ def realign_pos(pos):
     Re-align all reads covering a single reference column (within window).
     '''
 
-    aligner = Aligner(cfg.args.sub_scores, cfg.args.hp_scores)
     alignments = []
     bam = pysam.AlignmentFile(cfg.args.bam, 'rb')
 
@@ -204,10 +175,9 @@ def realign_pos(pos):
         read_end = read_idx
         seq = read.query_sequence[read_start:read_end]
 
-        alignment = aligner.align(ref, seq)
-        # alignment.dump()
-        this_cigar = extend_cigar_str(alignment.extended_cigar_str)
-        alignments.append((read.query_name, pos, this_cigar))
+        cigar = align(ref, seq, cfg.args.sub_scores, cfg.args.hp_scores)
+        dump(ref, seq, cigar)
+        alignments.append((read.query_name, pos, cigar))
 
     with cfg.pos_count.get_lock():
         cfg.pos_count.value += 1
@@ -215,52 +185,6 @@ def realign_pos(pos):
 
 
     return alignments
-
-
-def read_len(extended_cigar):
-    length = 0
-    for op in extended_cigar:
-        if op in 'SXI=M':
-            length += 1
-    return length
-
-def ref_len(extended_cigar):
-    length = 0
-    for op in extended_cigar:
-        if op in 'XD=M':
-            length += 1
-    return length
-
-
-
-def extend_cigar_str(cig):
-    groups = re.findall(r"(?P<len>\d+)(?P<op>\D+)", cig)
-    return ''.join([int(count)*op for (count, op) in groups])
-
-
-def extend_pysam_cigar(ops, counts):
-    return ''.join([int(count)*cfg.cigar[op] for (count, op) in zip(counts, ops)])
-
-
-def collapse_cigar(extended_cigar):
-    count = 1
-    last = None
-    groups = []
-    for op in extended_cigar:
-        if last and op == last:
-            count += 1
-        elif last:
-            groups.append((count, last))
-            count = 1
-        last = op
-
-    if last:
-        groups.append((count, last))
-
-    out = ''
-    for num, op in groups:
-        out += '%s%s' % (num, op)
-    return out
 
 
 

@@ -2,14 +2,17 @@
 '''
 Simple Smith-Waterman aligner
 '''
-import sys
 import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits import mplot3d
+from numba import njit
 import scipy.ndimage as ndimage
+
 import cfg
+from cig import *
 
 
+@njit()
 def fix_matrix_properties(scores, delta = 0.01):
     ''' Modify matrix so scores follow expected pattern. '''
 
@@ -20,7 +23,7 @@ def fix_matrix_properties(scores, delta = 0.01):
 
     # more insertions should be more penalized
     for j in range(1, l):
-        for i in reversed(range(0, j)):
+        for i in range(j-1, -1, -1):
             scores[i,j] = max(
                     scores[i,j], 
                     scores[i+1,j] + delta, 
@@ -29,7 +32,7 @@ def fix_matrix_properties(scores, delta = 0.01):
 
     # more deletions should be more penalized
     for i in range(1,l):
-        for j in reversed(range(0, i)):
+        for j in range(i-1, -1, -1):
             scores[i,j] = max(
                     scores[i,j], 
                     scores[i,j+1] + delta, 
@@ -39,7 +42,7 @@ def fix_matrix_properties(scores, delta = 0.01):
     # prefer insertions from longer homopolymers
     best = np.ones(l) * 1000
     for j in range(1,l):
-        for i in reversed(range(0,j)):
+        for i in range(j-1, -1, -1):
             ins_len = j - i
             if scores[i,j] < best[ins_len]:
                 best[ins_len] = scores[i,j]
@@ -57,7 +60,7 @@ def fix_matrix_properties(scores, delta = 0.01):
     # prefer deletions from longer homopolymers
     best = np.ones(l) * 1000
     for i in range(1,l):
-        for j in reversed(range(0,i)):
+        for j in range(i-1, -1, -1):
             del_len = i - j
             if scores[i,j] < best[del_len]:
                 best[del_len] = scores[i,j]
@@ -73,6 +76,7 @@ def fix_matrix_properties(scores, delta = 0.01):
                 )
 
     return scores
+
 
 
 def calc_score_matrices(subs, hps):
@@ -103,6 +107,7 @@ def calc_score_matrices(subs, hps):
     return sub_scores, hp_scores
 
 
+
 def plot_hp_score_matrix(hps, prefix="score_mat"):
 
     # surface plot
@@ -125,21 +130,7 @@ def plot_hp_score_matrix(hps, prefix="score_mat"):
 
 
 
-
-class Matrix(object):
-    ''' Wrapper for matrices. '''
-    def __init__(self, rows, cols, init=None):
-        self.rows = rows
-        self.cols = cols
-        self.values = [init, ] * rows * cols
-
-    def get(self, row, col):
-        return self.values[(row * self.cols) + col]
-
-    def set(self, row, col, val):
-        self.values[(row * self.cols) + col] = val
-
-
+@njit()
 def get_hp_lengths(seq):
     ''' Calculate HP length of substring starting at each index. '''
 
@@ -156,476 +147,270 @@ def get_hp_lengths(seq):
 
 
 
-class Aligner(object):
-    ''' Class for performing local alignment. '''
-    def __init__(self, sub_scores, hp_scores, indel_start=5, indel_extend=2, verbose=False):
-        ''' Set parameters for local alignment. '''
-        self.sub_scores = sub_scores
-        self.hp_scores = hp_scores
-        self.indel_start = indel_start
-        self.indel_extend = indel_extend
-        self.verbose = verbose
+@njit()
+def hp_indel_score(ref_hp_len, indel_len, hp_scores):
+
+    # error, don't allow
+    if ref_hp_len <= 0:
+        return 100
+    elif ref_hp_len + indel_len < 0:
+        return 100
+
+    # force lengths to fit in matrix
+    ref_hp_len = min(ref_hp_len, len(hp_scores)-1)
+    call_hp_len = min(ref_hp_len+indel_len, len(hp_scores)-1)
+    return hp_scores[ref_hp_len, call_hp_len]
 
 
-    def hp_indel_score(self, ref_hp_len, indel_len):
-
-        # error, don't allow
-        if ref_hp_len <= 0:
-            return 100
-        elif ref_hp_len + indel_len < 0:
-            return 100
-
-        # force lengths to fit in matrix
-        ref_hp_len = min(ref_hp_len, cfg.args.max_hp-1)
-        call_hp_len = min(ref_hp_len+indel_len, cfg.args.max_hp-1)
-        return self.hp_scores[ref_hp_len, call_hp_len]
-
-
-    def sub_score(self, query_base, ref_base):
-        return self.sub_scores[cfg.bases[ref_base], cfg.bases[query_base]]
+@njit()
+def base_idx(base):
+    if base == 'A':
+        return 0
+    elif base == 'C':
+        return 1
+    elif base == 'G':
+        return 2
+    elif base == 'T':
+        return 3
+    else:
+        return -1
 
 
-    def align(self, ref, query, ref_name='', query_name='', rc=False):
-        ''' Perform alignment. '''
 
-        ref_hp_lens = get_hp_lengths(ref)
+@njit()
+def align(ref, query, sub_scores, hp_scores, indel_start=5, indel_extend=2, verbose=False):
+    ''' Perform alignment. '''
 
-        rows = len(query) + 1
-        cols = len(ref) + 1
+    ref_hp_lens = get_hp_lengths(ref)
 
-        dims = 3
-        VALUE = 0
-        TYPE = 1
-        RUNLEN = 2
+    rows = len(query) + 1
+    cols = len(ref) + 1
 
-        typs = 5# types
-        SUB = 0 # substitution
-        INS = 1 # insertion
-        LHP = 2 # lengthen homopolymer
-        DEL = 3 # deletion
-        SHP = 4 # shorten homopolymer
+    dims = 3
+    VALUE = 0
+    TYPE = 1
+    RUNLEN = 2
 
-        # initialize first row/col of matrix
-        matrix = np.zeros((typs, rows, cols, dims))
-        for typ in range(typs):
-            for row in range(1, rows):
-                ins_val = self.indel_start if row == 1 else \
-                        matrix[typ, row-1, 0, VALUE] + self.indel_extend
-                matrix[typ, row, 0, :] = [ins_val, INS, 0]
+    typs = 5# types
+    SUB = 0 # substitution
+    INS = 1 # insertion
+    LHP = 2 # lengthen homopolymer
+    DEL = 3 # deletion
+    SHP = 4 # shorten homopolymer
 
-        for typ in range(typs):
-            for col in range(1, cols):
-                del_val = self.indel_start if col == 1 else \
-                        matrix[typ, 0, col-1, VALUE] + self.indel_extend
-                matrix[typ, 0, col, :] = [del_val, DEL, 0]
-
-        # calculate matrix
+    # initialize first row/col of matrix
+    matrix = np.zeros((typs, rows, cols, dims))
+    for typ in range(typs):
         for row in range(1, rows):
-            for col in range(1, cols):
-                ref_idx = col - 1
-                query_idx = row - 1
+            ins_val = indel_start if row == 1 else \
+                    matrix[typ, row-1, 0, VALUE] + indel_extend
+            matrix[typ, row, 0, :] = [ins_val, INS, 0]
 
-                # UPDATE INS MATRIX
-                # continue INS
-                ins_run = matrix[INS, row-1, col, RUNLEN] + 1
-                ins_val = matrix[INS, row-1, col, VALUE] + self.indel_extend
-                matrix[INS, row, col, :] = [ins_val, INS, ins_run]
+    for typ in range(typs):
+        for col in range(1, cols):
+            del_val = indel_start if col == 1 else \
+                    matrix[typ, 0, col-1, VALUE] + indel_extend
+            matrix[typ, 0, col, :] = [del_val, DEL, 0]
 
-                # start INS
-                min_val = ins_val
-                for typ in [SUB, LHP, SHP]:
-                    start_val = matrix[typ, row-1, col, VALUE] + self.indel_start
+    # calculate matrix
+    for row in range(1, rows):
+        for col in range(1, cols):
+            ref_idx = col - 1
+            query_idx = row - 1
+
+            # UPDATE INS MATRIX
+            # continue INS
+            ins_run = matrix[INS, row-1, col, RUNLEN] + 1
+            ins_val = matrix[INS, row-1, col, VALUE] + indel_extend
+            matrix[INS, row, col, :] = [ins_val, INS, ins_run]
+
+            # start INS
+            min_val = ins_val
+            for typ in [SUB, LHP, SHP]:
+                start_val = matrix[typ, row-1, col, VALUE] + indel_start
+                if start_val < min_val:
+                    min_val = start_val
+                    matrix[INS, row, col, :] = [min_val, typ, 1]
+
+
+            # UPDATE DEL MATRIX
+            # continue DEL
+            del_run = matrix[DEL, row, col-1, RUNLEN] + 1
+            del_val = matrix[DEL, row, col-1, VALUE] + indel_extend
+            matrix[DEL, row, col, :] = [del_val, DEL, del_run]
+
+            # start DEL
+            min_val = del_val
+            for typ in [SUB, LHP, SHP]:
+                start_val = matrix[typ, row, col-1, VALUE] + indel_start
+                if start_val < min_val:
+                    min_val = start_val
+                    matrix[DEL, row, col, :] = [min_val, typ, 1]
+
+
+            # UPDATE LHP MATRIX
+            if query_idx+2 < len(query) and ref_idx+1 < len(ref) and \
+                    query[query_idx+1] == query[query_idx+2]: # only insert same base
+
+                # continue LHP
+                lhp_run = int(matrix[LHP, row-1, col, RUNLEN] + 1)
+                lhp_val = matrix[LHP, row-lhp_run, col, VALUE] + \
+                        hp_indel_score(ref_hp_lens[ref_idx+1], lhp_run, hp_scores)
+                matrix[LHP, row, col, :] = [lhp_val, LHP, lhp_run]
+
+                # start LHP
+                # if query[query_idx+1] != query[query_idx]:
+                min_val = lhp_val
+                for typ in [SUB, DEL, INS, SHP]:
+                    start_val = matrix[typ, row-1, col, VALUE] + \
+                            hp_indel_score(ref_hp_lens[ref_idx+1], 1, hp_scores)
                     if start_val < min_val:
                         min_val = start_val
-                        matrix[INS, row, col, :] = [min_val, typ, 1]
+                        matrix[LHP, row, col, :] = [min_val, typ, 1]
+
+            else: # don't allow insertion of different base
+                lhp_val = max(matrix[:, row-1, col, VALUE]) + 100
+                matrix[LHP, row, col, :] = [lhp_val, SUB, 0]
 
 
-                # UPDATE DEL MATRIX
-                # continue DEL
-                del_run = matrix[DEL, row, col-1, RUNLEN] + 1
-                del_val = matrix[DEL, row, col-1, VALUE] + self.indel_extend
-                matrix[DEL, row, col, :] = [del_val, DEL, del_run]
+            # UPDATE SHP MATRIX
+            if ref_idx+1 < len(ref) and \
+                    ref[ref_idx+1] == ref[ref_idx]: # only delete same base
 
-                # start DEL
-                min_val = del_val
-                for typ in [SUB, LHP, SHP]:
-                    start_val = matrix[typ, row, col-1, VALUE] + self.indel_start
+                # continue SHP
+                shp_run = int(matrix[SHP, row, col-1, RUNLEN] + 1)
+                shp_val = matrix[SHP, row, col-shp_run, VALUE] + \
+                        hp_indel_score(ref_hp_lens[ref_idx], -shp_run, hp_scores)
+                matrix[SHP, row, col, :] = [shp_val, SHP, shp_run]
+
+                # start SHP
+                # if ref_idx and ref[ref_idx] != ref[ref_idx-1]:
+                min_val = shp_val
+                for typ in [SUB, DEL, INS, LHP]:
+                    start_val = matrix[typ, row, col-1, VALUE] + \
+                        hp_indel_score(ref_hp_lens[ref_idx], -1, hp_scores)
                     if start_val < min_val:
                         min_val = start_val
-                        matrix[DEL, row, col, :] = [min_val, typ, 1]
+                        matrix[SHP, row, col, :] = [min_val, typ, 1]
+
+            else: # don't allow deleting different base
+                shp_val = max(matrix[:, row, col-1, VALUE]) + 100
+                matrix[SHP, row, col, :] = [shp_val, SUB, 0]
 
 
-                # UPDATE LHP MATRIX
-                if query_idx+2 < len(query) and ref_idx+1 < len(ref) and \
-                        query[query_idx+1] == query[query_idx+2]: # only insert same base
+            # UPDATE SUB MATRIX
+            # simple SUB lookup
+            sub_val = matrix[SUB, row-1, col-1, VALUE] + \
+                    sub_scores[ 
+                            base_idx( query[query_idx] ), 
+                            base_idx( ref[ref_idx] ) 
+                    ]
+            min_val = sub_val
+            matrix[SUB, row, col, :] = [min_val, SUB, 0]
 
-                    # continue LHP
-                    lhp_run = int(matrix[LHP, row-1, col, RUNLEN] + 1)
-                    lhp_val = matrix[LHP, row-lhp_run, col, VALUE] + \
-                            self.hp_indel_score(ref_hp_lens[ref_idx+1], lhp_run)
-                    matrix[LHP, row, col, :] = [lhp_val, LHP, lhp_run]
-
-                    # start LHP
-                    # if query[query_idx+1] != query[query_idx]:
-                    min_val = lhp_val
-                    for typ in [SUB, DEL, INS, SHP]:
-                        start_val = matrix[typ, row-1, col, VALUE] + \
-                                self.hp_indel_score(ref_hp_lens[ref_idx+1], 1)
-                        if start_val < min_val:
-                            min_val = start_val
-                            matrix[LHP, row, col, :] = [min_val, typ, 1]
-
-                else: # don't allow insertion of different base
-                    lhp_val = max(matrix[:, row-1, col, VALUE]) + 100
-                    matrix[LHP, row, col, :] = [lhp_val, SUB, 0]
+            # end INDEL
+            for typ in [INS, LHP, DEL, SHP]:
+                end_val = matrix[typ, row, col, VALUE]
+                if end_val < min_val:
+                    min_val = end_val
+                    matrix[SUB, row, col, :] = [min_val, typ, 0]
 
 
-                # UPDATE SHP MATRIX
-                if ref_idx+1 < len(ref) and \
-                        ref[ref_idx+1] == ref[ref_idx]: # only delete same base
+    # initialize backtracking from last cell
+    aln = ''
+    path = []
+    row, col = rows-1, cols-1
+    old_typ = np.argmin(matrix[:, row, col, VALUE])
 
-                    # continue SHP
-                    shp_run = int(matrix[SHP, row, col-1, RUNLEN] + 1)
-                    shp_val = matrix[SHP, row, col-shp_run, VALUE] + \
-                            self.hp_indel_score(ref_hp_lens[ref_idx], -shp_run)
-                    matrix[SHP, row, col, :] = [shp_val, SHP, shp_run]
-
-                    # start SHP
-                    # if ref_idx and ref[ref_idx] != ref[ref_idx-1]:
-                    min_val = shp_val
-                    for typ in [SUB, DEL, INS, LHP]:
-                        start_val = matrix[typ, row, col-1, VALUE] + \
-                            self.hp_indel_score(ref_hp_lens[ref_idx], -1)
-                        if start_val < min_val:
-                            min_val = start_val
-                            matrix[SHP, row, col, :] = [min_val, typ, 1]
-
-                else: # don't allow deleting different base
-                    shp_val = max(matrix[:, row, col-1, VALUE]) + 100
-                    matrix[SHP, row, col, :] = [shp_val, SUB, 0]
-
-
-                # UPDATE SUB MATRIX
-                # simple SUB lookup
-                sub_val = matrix[SUB, row-1, col-1, VALUE] + \
-                        self.sub_score(query[query_idx], ref[ref_idx])
-                min_val = sub_val
-                matrix[SUB, row, col, :] = [min_val, SUB, 0]
-
-                # end INDEL
-                for typ in [INS, LHP, DEL, SHP]:
-                    end_val = matrix[typ, row, col, VALUE]
-                    if end_val < min_val:
-                        min_val = end_val
-                        matrix[SUB, row, col, :] = [min_val, typ, 0]
-
-
-        # initialize backtracking from last cell
-        aln, path = [], []
-        row, col = rows-1, cols-1
-        old_typ = np.argmin(matrix[:, row, col, VALUE])
-
-        # backtrack
-        while row > 0 or col > 0:
-
-            path.append((int(old_typ), row, col))
-            val, new_typ, runlen = matrix[int(old_typ), row, col, :]
-            op = ''
-            if new_typ == LHP or new_typ == INS:   # each move is an insertion
-                op = 'I'
+    # backtrack
+    while row > 0 or col > 0:
+        path.append((int(old_typ), row, col))
+        val, new_typ, runlen = matrix[int(old_typ), row, col, :]
+        op = ''
+        if new_typ == LHP or new_typ == INS:   # each move is an insertion
+            op = 'I'
+            row -= 1
+        elif new_typ == SHP or new_typ == DEL: # each move is a deletion
+            op = 'D'
+            col -= 1
+        elif new_typ == SUB: # only sub if stay in same matrix
+            if old_typ == SUB:
                 row -= 1
-            elif new_typ == SHP or new_typ == DEL: # each move is a deletion
-                op = 'D'
                 col -= 1
-            elif new_typ == SUB: # only sub if stay in same matrix
-                if old_typ == SUB:
-                    row -= 1
-                    col -= 1
-                    op = 'M'
-            else:
-                print(f"ERROR: unknown alignment matrix type '{typ}'.")
-                exit(1)
-
-            aln.append(op)
-
-            old_typ = new_typ
-
-        final_row = row
-        final_col = col
-
-        # we backtracked, so get forward alignment
-        aln.reverse()
-
-        if self.verbose:
-            types = ['SUB', 'INS', 'LHP', 'DEL', 'SHP']
-            ops = 'MILDS'
-            for typ, name in enumerate(types):
-                print('\n\n', name)
-                sys.stdout.write('  -    ')
-                sys.stdout.write('    '.join(ref))
-                sys.stdout.write('\n')
-                for row in range(rows):
-                    if row == 0:
-                        sys.stdout.write('-')
-                    else:
-                        sys.stdout.write(query[row-1])
-
-                    for col in range(cols):
-                        sys.stdout.write(' %2d%s%s' % 
-                                (int(matrix[typ, row, col, RUNLEN]), ops[int(matrix[typ, row, col, TYPE])], 
-                                    '$' if (typ, row, col) in path else ' '))
-                    sys.stdout.write('\n')
-
-        # return alignment
-        return Alignment(query, ref, final_row, final_col, _reduce_cigar(aln), 
-                matrix[SUB, rows-1, cols-1, VALUE], 
-                ref_name, query_name, rc)
-
-
-
-def _reduce_cigar(operations):
-    ''' Count adjacent CIGAR operations. 
-        - reduces 'MMIIIMMMMDDD' to [(2, 'M'), (3, 'I'), (4, 'M'), (3, 'D')]
-    '''
-    count = 1
-    last = None
-    ret = []
-    for op in operations:
-        if last and op == last:
-            count += 1
-        elif last:
-            ret.append((count, last))
-            count = 1
-        last = op
-
-    if last:
-        ret.append((count, last))
-    return ret
-
-
-
-def _cigar_str(cigar):
-    ''' Convert CIGAR string from list of tuples to string. '''
-    out = ''
-    for num, op in cigar:
-        out += '%s%s' % (num, op)
-    return out
-
-
-
-class Alignment(object):
-    ''' Class for working with alignment results and printing. '''
-    def __init__(self, query, ref, q_pos, r_pos, cigar, score, ref_name='', 
-            query_name='', rc=False):
-        self.query = query
-        self.ref = ref
-        self.q_pos = q_pos
-        self.r_pos = r_pos
-        self.cigar = cigar
-        self.score = score
-        self.r_name = ref_name
-        self.q_name = query_name
-        self.rc = rc
-
-        self.r_offset = 0
-        self.r_region = None
-
-        self.query = query
-        self.ref = ref
-
-        q_len = 0
-        r_len = 0
-
-        self.matches = 0
-        self.mismatches = 0
-
-        i = self.r_pos
-        j = self.q_pos
-
-        for count, op in self.cigar:
-            if op == 'M':
-                q_len += count
-                r_len += count
-                for k in range(count):
-                    if self.query[j] == self.ref[i]:
-                        self.matches += 1
-                    else:
-                        self.mismatches += 1
-                    i += 1
-                    j += 1
-
-            elif op == 'I':
-                q_len += count
-                j += count
-                self.mismatches += count
-            elif op == 'D':
-                r_len += count
-                i += count
-                self.mismatches += count
-
-        self.q_end = q_pos + q_len
-        self.r_end = r_pos + r_len
-        if self.mismatches + self.matches > 0:
-            self.identity = float(self.matches) / (self.mismatches + self.matches)
+                op = '=' if ref[col] == query[row] else 'X'
         else:
-            self.identity = 0
+            print("ERROR: unknown alignment matrix type '" + str(typ) + "'.")
+        aln += op
+        old_typ = new_typ
+
+    # debug print matrices
+    if verbose:
+        types = ['SUB', 'INS', 'LHP', 'DEL', 'SHP']
+        ops = 'MILDS'
+        for typ, name in enumerate(types):
+            print('\n\n', name)
+            print('  -    ')
+            print('    '.join(ref))
+            print('\n')
+            for row in range(rows):
+                if row == 0:
+                    print('-')
+                else:
+                    print(query[row-1])
+
+                for col in range(cols):
+                    print(" " + str(int(matrix[typ, row, col, RUNLEN])) + \
+                            ops[int(matrix[typ, row, col, TYPE])] + \
+                            '$' if (typ, row, col) in path else ' ')
+                print('\n')
+
+    # we backtracked, so get forward alignment
+    return aln[::-1]
 
 
-    @property
-    def extended_cigar_str(self):
-        ''' Return =XID CIGAR string. '''
-        qpos = 0
-        rpos = 0
-        ext_cigar_str = ''
-        working = []
-        for count, op in self.cigar:
-            if op == 'M':
-                for k in range(count):
-                    if self.query[self.q_pos + qpos + k] == self.ref[self.r_pos + rpos + k]:
-                        ext_cigar_str += '='
-                    else:
-                        ext_cigar_str += 'X'
-                qpos += count
-                rpos += count
 
-            elif op == 'I':
-                qpos += count
-                ext_cigar_str += 'I' * count
-            elif op == 'D':
-                rpos += count
-                ext_cigar_str += 'D' * count
+def dump(ref, seq, cigar):
+    ''' Pretty print full alignment result. '''
 
-            working = _reduce_cigar(ext_cigar_str)
+    ref_str = ''
+    cig_str = ''
+    seq_str = ''
 
-        out = ''
-        for num, op in working:
-            out += '%s%s' % (num, op)
-        return out
+    ref_idx = 0
+    seq_idx = 0
 
+    for idx, op in enumerate(cigar):
+        if op == '=':
+            ref_str += ref[ref_idx]
+            ref_idx += 1
+            seq_str += seq[seq_idx]
+            seq_idx += 1
+            cig_str += '|'
 
-    @property
-    def cigar_str(self):
-        ''' Return MID CIGAR string. '''
-        return _cigar_str(self.cigar)
+        elif op == 'X':
+            ref_str += ref[ref_idx]
+            ref_idx += 1
+            seq_str += seq[seq_idx]
+            seq_idx += 1
+            cig_str += 'X'
 
+        elif op == 'D':
+            ref_str += ref[ref_idx]
+            ref_idx += 1
+            seq_str += '-'
+            cig_str += ' '
 
-    def dump(self, wrap=None, out=sys.stdout):
-        ''' Pretty print full alignment result. '''
-        i = self.r_pos
-        j = self.q_pos
+        elif op == 'I':
+            ref_str += '-'
+            seq_str += seq[seq_idx]
+            seq_idx += 1
+            cig_str += ' '
 
-        q = ''
-        m = ''
-        r = ''
-        qlen = 0
-        rlen = 0
-
-        for count, op in self.cigar:
-            if op == 'M':
-                qlen += count
-                rlen += count
-                for k in range(count):
-                    q += self.query[j]
-                    r += self.ref[i]
-                    if self.query[j] == self.ref[i]:
-                        m += '|'
-                    else:
-                        m += '.'
-
-                    i += 1
-                    j += 1
-            elif op == 'D':
-                rlen += count
-                for k in range(count):
-                    q += '-'
-                    r += self.ref[i]
-                    m += ' '
-                    i += 1
-            elif op == 'I':
-                qlen += count
-                for k in range(count):
-                    q += self.query[j]
-                    r += '-'
-                    m += ' '
-                    j += 1
-
-            elif op == 'N':
-                q += '-//-'
-                r += '-//-'
-                m += '    '
-
-        if self.q_name:
-            out.write('\n\nQuery: %s%s (%s nt)\n' % (self.q_name, \
-                    ' (reverse-complement)' if self.rc else '', len(self.query)))
-        if self.r_name:
-            if self.r_region:
-                out.write('Ref  : %s (%s)\n\n' % (self.r_name, self.r_region))
-            else:
-                out.write('Ref  : %s (%s nt)\n\n' % (self.r_name, len(self.ref)))
-
-        poslens = [self.q_pos + 1, self.q_end + 1, 
-                self.r_pos + self.r_offset + 1, self.r_end + self.r_offset + 1]
-        maxlen = max([len(str(x)) for x in poslens])
-
-        q_pre = '\n\nQuery: %%%ss ' % maxlen
-        r_pre = 'Ref  : %%%ss ' % maxlen
-        m_pre = ' ' * (8 + maxlen)
-
-        rpos = self.r_pos
-        if not self.rc:
-            qpos = self.q_pos
         else:
-            qpos = self.q_end
+            print(f"ERROR: unrecognized CIGAR operation '{op}' at cigar index {len(cig_str)}.")
+            exit(1)
 
-        while q and r and m:
-            if not self.rc:
-                out.write(q_pre % (qpos + 1))  # pos is displayed as 1-based
-            else:
-                out.write(q_pre % (qpos))  # revcomp is 1-based on the 3' end
-
-            if wrap:
-                qfragment = q[:wrap]
-                mfragment = m[:wrap]
-                rfragment = r[:wrap]
-
-                q = q[wrap:]
-                m = m[wrap:]
-                r = r[wrap:]
-            else:
-                qfragment = q
-                mfragment = m
-                rfragment = r
-
-                q = ''
-                m = ''
-                r = ''
-
-            out.write(qfragment)
-            if not self.rc:
-                for base in qfragment:
-                    if base != '-':
-                        qpos += 1
-            else:
-                for base in qfragment:
-                    if base != '-':
-                        qpos -= 1
-
-            if not self.rc:
-                out.write(' %s\n' % qpos)
-            else:
-                out.write(' %s\n' % (qpos + 1))
-
-            out.write(m_pre)
-            out.write(mfragment)
-            out.write('\n')
-            out.write(r_pre % (rpos + self.r_offset + 1))
-            out.write(rfragment)
-            for base in rfragment:
-                if base != '-':
-                    rpos += 1
-            out.write(' %s\n\n' % (rpos + self.r_offset))
-
-        out.write("Score: %s\n" % self.score)
-        out.write("Matches: %s (%.1f%%)\n" % (self.matches, self.identity * 100))
-        out.write("Mismatches: %s\n" % (self.mismatches,))
-        out.write("CIGAR: %s\n" % self.cigar_str)
+    print(f"REF: {ref_str} len: {len(ref)} ciglen: {sum([op in 'XD=M' for op in cigar])}\n"
+          f"     {cig_str}\n"
+          f"SEQ: {seq_str} len: {len(seq)} ciglen: {sum([op in 'SXI=M' for op in cigar])}\n"
+          f"Cigar: {collapse_cigar(cigar)}\n\n")
