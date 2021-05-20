@@ -190,161 +190,196 @@ class Aligner(object):
 
         ref_hp_lens = get_hp_lengths(ref)
 
-        # initialize first row/col of matrix
+        rows = len(query) + 1
+        cols = len(ref) + 1
+
+        dims = 3
         VALUE = 0
         TYPE = 1
         RUNLEN = 2
-        matrix = Matrix( len(query)+1, len(ref)+1, (0, ' ', 0))
-        for row in range(1, matrix.rows):
-            if row == 1: 
-                val = self.indel_start
-            else: 
-                val = matrix.get(row-1, 0)[VALUE] + self.indel_extend
-            matrix.set(row, 0, (val, 'I', row))
-        for col in range(1, matrix.cols):
-            if col == 1: 
-                val = self.indel_start
-            else: 
-                val = matrix.get(0, col-1)[VALUE] + self.indel_extend
-            matrix.set(0, col, (val, 'D', col))
+
+        typs = 5# types
+        SUB = 0 # substitution
+        INS = 1 # insertion
+        LHP = 2 # lengthen homopolymer
+        DEL = 3 # deletion
+        SHP = 4 # shorten homopolymer
+
+        # initialize first row/col of matrix
+        matrix = np.zeros((typs, rows, cols, dims))
+        for typ in range(typs):
+            for row in range(1, rows):
+                ins_val = self.indel_start if row == 1 else \
+                        matrix[typ, row-1, 0, VALUE] + self.indel_extend
+                matrix[typ, row, 0, :] = [ins_val, INS, 0]
+
+        for typ in range(typs):
+            for col in range(1, cols):
+                del_val = self.indel_start if col == 1 else \
+                        matrix[typ, 0, col-1, VALUE] + self.indel_extend
+                matrix[typ, 0, col, :] = [del_val, DEL, 0]
 
         # calculate matrix
-        for row in range(1, matrix.rows):
-            for col in range(1, matrix.cols):
+        for row in range(1, rows):
+            for col in range(1, cols):
                 ref_idx = col - 1
                 query_idx = row - 1
 
-                # look up score for match/sub
-                sub_val = matrix.get(row-1, col-1)[VALUE] + \
-                        self.sub_score(query[query_idx], ref[ref_idx])
+                # UPDATE INS MATRIX
+                # continue INS
+                ins_run = matrix[INS, row-1, col, RUNLEN] + 1
+                ins_val = matrix[INS, row-1, col, VALUE] + self.indel_extend
+                matrix[INS, row, col, :] = [ins_val, INS, ins_run]
 
-                # calculate insertion score
-                ins_run = 1
-                if matrix.get(row-1, col)[TYPE] == 'I': # continue INS
-                    ins_run = matrix.get(row-1, col)[RUNLEN] + 1
-                    ins_val = matrix.get(row-1, col)[VALUE] + self.indel_extend
-                else:
-                    ins_val = matrix.get(row-1, col)[VALUE] + self.indel_start
+                # start INS
+                min_val = ins_val
+                for typ in [SUB, LHP, SHP]:
+                    start_val = matrix[typ, row-1, col, VALUE] + self.indel_start
+                    if start_val < min_val:
+                        min_val = start_val
+                        matrix[INS, row, col, :] = [min_val, typ, 1]
 
-                # calculate deletion score
-                del_run = 1
-                if matrix.get(row, col-1)[TYPE] == 'D': # continue DEL
-                    del_run = matrix.get(row, col-1)[RUNLEN] + 1
-                    del_val = matrix.get(row, col-1)[VALUE] + self.indel_extend
-                else:
-                    del_val = matrix.get(row, col-1)[VALUE] + self.indel_start
 
-                # calculate HP lengthening score
-                lhp_run = 1
+                # UPDATE DEL MATRIX
+                # continue DEL
+                del_run = matrix[DEL, row, col-1, RUNLEN] + 1
+                del_val = matrix[DEL, row, col-1, VALUE] + self.indel_extend
+                matrix[DEL, row, col, :] = [del_val, DEL, del_run]
+
+                # start DEL
+                min_val = del_val
+                for typ in [SUB, LHP, SHP]:
+                    start_val = matrix[typ, row, col-1, VALUE] + self.indel_start
+                    if start_val < min_val:
+                        min_val = start_val
+                        matrix[DEL, row, col, :] = [min_val, typ, 1]
+
+
+                # UPDATE LHP MATRIX
                 if query_idx+2 < len(query) and ref_idx+1 < len(ref) and \
                         query[query_idx+1] == query[query_idx+2]: # only insert same base
-                    if query[query_idx+1] != query[query_idx]: # start run
-                        lhp_run = 1
-                        lhp_val = matrix.get(row-lhp_run, col)[VALUE] + \
-                                self.hp_indel_score(ref_hp_lens[ref_idx+1], lhp_run)
-                    elif matrix.get(row-1, col)[TYPE] == 'L': # continue run
-                        lhp_run = matrix.get(row-1, col)[RUNLEN] + 1
-                        lhp_val = matrix.get(row-lhp_run, col)[VALUE] + \
-                                self.hp_indel_score(ref_hp_lens[ref_idx+1], lhp_run)
-                    else: # don't allow mid-HP insertion
-                        lhp_val = matrix.get(row-1, col)[VALUE] + 100
-                else: # don't allow insertion of different base
-                    lhp_val = matrix.get(row-1, col)[VALUE] + 100
 
-                # calculate HP shortening score
-                shp_run = 1
+                    # continue LHP
+                    lhp_run = int(matrix[LHP, row-1, col, RUNLEN] + 1)
+                    lhp_val = matrix[LHP, row-lhp_run, col, VALUE] + \
+                            self.hp_indel_score(ref_hp_lens[ref_idx+1], lhp_run)
+                    matrix[LHP, row, col, :] = [lhp_val, LHP, lhp_run]
+
+                    # start LHP
+                    # if query[query_idx+1] != query[query_idx]:
+                    min_val = lhp_val
+                    for typ in [SUB, DEL, INS, SHP]:
+                        start_val = matrix[typ, row-1, col, VALUE] + \
+                                self.hp_indel_score(ref_hp_lens[ref_idx+1], 1)
+                        if start_val < min_val:
+                            min_val = start_val
+                            matrix[LHP, row, col, :] = [min_val, typ, 1]
+
+                else: # don't allow insertion of different base
+                    lhp_val = max(matrix[:, row-1, col, VALUE]) + 100
+                    matrix[LHP, row, col, :] = [lhp_val, SUB, 0]
+
+
+                # UPDATE SHP MATRIX
                 if ref_idx+1 < len(ref) and \
                         ref[ref_idx+1] == ref[ref_idx]: # only delete same base
-                    if ref_idx and ref[ref_idx] != ref[ref_idx-1]: # start run
-                        shp_run = 1
-                        shp_val = matrix.get(row, col-shp_run)[VALUE] + \
-                                self.hp_indel_score(ref_hp_lens[ref_idx], -shp_run)
-                    elif matrix.get(row, col-1)[TYPE] == 'S': # continue run
-                        shp_run = matrix.get(row, col-1)[RUNLEN] + 1
-                        shp_val = matrix.get(row, col-shp_run)[VALUE] + \
-                                self.hp_indel_score(ref_hp_lens[ref_idx], -shp_run)
-                    else: # don't allow mid-HP deletion
-                        shp_val = matrix.get(row, col-1)[VALUE] + 100
+
+                    # continue SHP
+                    shp_run = int(matrix[SHP, row, col-1, RUNLEN] + 1)
+                    shp_val = matrix[SHP, row, col-shp_run, VALUE] + \
+                            self.hp_indel_score(ref_hp_lens[ref_idx], -shp_run)
+                    matrix[SHP, row, col, :] = [shp_val, SHP, shp_run]
+
+                    # start SHP
+                    # if ref_idx and ref[ref_idx] != ref[ref_idx-1]:
+                    min_val = shp_val
+                    for typ in [SUB, DEL, INS, LHP]:
+                        start_val = matrix[typ, row, col-1, VALUE] + \
+                            self.hp_indel_score(ref_hp_lens[ref_idx], -1)
+                        if start_val < min_val:
+                            min_val = start_val
+                            matrix[SHP, row, col, :] = [min_val, typ, 1]
 
                 else: # don't allow deleting different base
-                    shp_val = matrix.get(row, col-1)[VALUE] + 100
+                    shp_val = max(matrix[:, row, col-1, VALUE]) + 100
+                    matrix[SHP, row, col, :] = [shp_val, SUB, 0]
 
-                # determine optimal alignment for this cell
-                cell_val = min(sub_val, del_val, ins_val, lhp_val, shp_val)
-                if cell_val == sub_val: # match/sub
-                    cell = (cell_val, 'M', 0)
-                elif cell_val == del_val: # start deletion
-                    cell = (cell_val, 'D', del_run)
-                elif cell_val == ins_val: # start insertion
-                    cell = (cell_val, 'I', ins_run)
-                elif cell_val == lhp_val: # lengthen homopolymer
-                    cell = (cell_val, 'L', lhp_run)
-                elif cell_val == shp_val: # shorten homopolymer
-                    cell = (cell_val, 'S', shp_run)
-                else:
-                    cell = (0, 'X', 0) # error
 
-                matrix.set(row, col, cell)
+                # UPDATE SUB MATRIX
+                # simple SUB lookup
+                sub_val = matrix[SUB, row-1, col-1, VALUE] + \
+                        self.sub_score(query[query_idx], ref[ref_idx])
+                min_val = sub_val
+                matrix[SUB, row, col, :] = [min_val, SUB, 0]
+
+                # end INDEL
+                for typ in [INS, LHP, DEL, SHP]:
+                    end_val = matrix[typ, row, col, VALUE]
+                    if end_val < min_val:
+                        min_val = end_val
+                        matrix[SUB, row, col, :] = [min_val, typ, 0]
+
 
         # initialize backtracking from last cell
-        row = matrix.rows - 1
-        col = matrix.cols - 1
-        val = matrix.get(row, col)[VALUE]
-        op, aln, path = '', [], []
+        aln, path = [], []
+        row, col = rows-1, cols-1
+        old_typ = np.argmin(matrix[:, row, col, VALUE])
 
         # backtrack
         while row > 0 or col > 0:
 
-            # update path and alignment
-            val, op, runlen = matrix.get(row, col)
-            if op == 'L': op = 'I'
-            if op == 'S': op = 'D'
-            path.append((row, col))
+            path.append((int(old_typ), row, col))
+            val, new_typ, runlen = matrix[int(old_typ), row, col, :]
+            op = ''
+            if new_typ == LHP or new_typ == INS:   # each move is an insertion
+                op = 'I'
+                row -= 1
+            elif new_typ == SHP or new_typ == DEL: # each move is a deletion
+                op = 'D'
+                col -= 1
+            elif new_typ == SUB: # only sub if stay in same matrix
+                if old_typ == SUB:
+                    row -= 1
+                    col -= 1
+                    op = 'M'
+            else:
+                print(f"ERROR: unknown alignment matrix type '{typ}'.")
+                exit(1)
+
             aln.append(op)
 
-            # update pointers for next cell
-            if op == 'M':
-                row -= 1
-                col -= 1
-            elif op == 'I':
-                row -= 1
-            elif op == 'D':
-                col -= 1
-            else:
-                break
+            old_typ = new_typ
+
+        final_row = row
+        final_col = col
+
         # we backtracked, so get forward alignment
         aln.reverse()
 
-        # debug printing
         if self.verbose:
-            self.dump_matrix(ref, query, matrix, path)
-            print(aln)
+            types = ['SUB', 'INS', 'LHP', 'DEL', 'SHP']
+            ops = 'MILDS'
+            for typ, name in enumerate(types):
+                print('\n\n', name)
+                sys.stdout.write('  -    ')
+                sys.stdout.write('    '.join(ref))
+                sys.stdout.write('\n')
+                for row in range(rows):
+                    if row == 0:
+                        sys.stdout.write('-')
+                    else:
+                        sys.stdout.write(query[row-1])
+
+                    for col in range(cols):
+                        sys.stdout.write(' %2d%s%s' % 
+                                (int(matrix[typ, row, col, RUNLEN]), ops[int(matrix[typ, row, col, TYPE])], 
+                                    '$' if (typ, row, col) in path else ' '))
+                    sys.stdout.write('\n')
 
         # return alignment
-        return Alignment(query, ref, row, col, _reduce_cigar(aln), 
-                matrix.get(matrix.rows-1, matrix.cols-1)[VALUE], 
+        return Alignment(query, ref, final_row, final_col, _reduce_cigar(aln), 
+                matrix[SUB, rows-1, cols-1, VALUE], 
                 ref_name, query_name, rc)
-
-
-    def dump_matrix(self, ref, query, matrix, path, show_row=-1, show_col=-1):
-        ''' Pretty print alignment matrix. '''
-        sys.stdout.write('   -     ')
-        sys.stdout.write('    '.join(ref))
-        sys.stdout.write('\n')
-        for row in range(matrix.rows):
-            if row == 0:
-                sys.stdout.write('-')
-            else:
-                sys.stdout.write(query[row - 1])
-
-            for col in range(matrix.cols):
-                if show_row == row and show_col == col:
-                    sys.stdout.write('       *')
-                else:
-                    sys.stdout.write(' %2d%s%s' % 
-                            (int(matrix.get(row, col)[0]), matrix.get(row, col)[1], 
-                                '$' if (row, col) in path else ' '))
-            sys.stdout.write('\n')
 
 
 

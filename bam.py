@@ -51,8 +51,7 @@ def realign_bam(positions):
     print('    > computing subread realignments')
     cfg.pos_count.value = 0
     with mp.Pool() as pool:
-        print(positions[:1])
-        subread_alignments = pool.map(realign_pos, positions[:1])
+        subread_alignments = pool.map(realign_pos, positions)
     subread_alignments = list(itertools.chain(*subread_alignments))
 
     # store results in dict, grouped by read
@@ -206,7 +205,7 @@ def realign_pos(pos):
         seq = read.query_sequence[read_start:read_end]
 
         alignment = aligner.align(ref, seq)
-        alignment.dump()
+        # alignment.dump()
         this_cigar = extend_cigar_str(alignment.extended_cigar_str)
         alignments.append((read.query_name, pos, this_cigar))
 
