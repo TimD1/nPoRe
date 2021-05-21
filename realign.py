@@ -58,13 +58,6 @@ def main():
     print("\n> calculating score matrices")
     cfg.args.sub_scores, cfg.args.hp_scores = calc_score_matrices(subs, hps)
 
-    # aligner = Aligner(cfg.args.sub_scores, cfg.args.hp_scores, verbose=True)
-    # ref = "ATTTTTTTCTAATTTTTATTTATTTAAAAAAAATTTTTTGAGACGG"
-    # seq = "ATTTTTTCTAATTTTTATTTATTTAAAAATTTTTTGAGACGGGGTC"
-    # alignment = aligner.align(ref, seq)
-    # alignment.dump()
-    # exit(0)
-
     if cfg.args.plot:
         print("> plotting score matrices")
         plot_hp_score_matrix(cfg.args.hp_scores)

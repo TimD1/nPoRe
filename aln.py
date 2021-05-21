@@ -178,7 +178,7 @@ def base_idx(base):
 
 
 @njit()
-def align(ref, query, sub_scores, hp_scores, indel_start=5, indel_extend=2, verbose=False):
+def align(ref, query, orig_ref, sub_scores, hp_scores, indel_start=5, indel_extend=2, verbose=False):
     ''' Perform alignment. '''
 
     ref_hp_lens = get_hp_lengths(ref)
@@ -337,7 +337,7 @@ def align(ref, query, sub_scores, hp_scores, indel_start=5, indel_extend=2, verb
             if old_typ == SUB:
                 row -= 1
                 col -= 1
-                op = '=' if ref[col] == query[row] else 'X'
+                op = '=' if orig_ref[col] == query[row] else 'X'
         else:
             print("ERROR: unknown alignment matrix type '" + str(typ) + "'.")
         aln += op

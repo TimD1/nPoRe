@@ -11,7 +11,7 @@ import cfg
 from aln import *
 from cig import *
 
-def realign_bam(positions):
+def realign_bam(data):
     '''
     Wrapper for multi-threaded read re-alignment at each BAM position.
     '''
@@ -23,7 +23,7 @@ def realign_bam(positions):
     print('    > computing subread realignments')
     cfg.pos_count.value = 0
     with mp.Pool() as pool:
-        subread_alignments = pool.map(realign_pos, positions[:10])
+        subread_alignments = pool.map(realign_pos, data)
     subread_alignments = list(itertools.chain(*subread_alignments))
 
     # store results in dict, grouped by read
@@ -106,11 +106,12 @@ def splice_realignments(read_data):
 
 
 
-def realign_pos(pos):
+def realign_pos(data):
     '''
     Re-align all reads covering a single reference column (within window).
     '''
 
+    pos, alleles, gt = data
     alignments = []
     bam = pysam.AlignmentFile(cfg.args.bam, 'rb')
 
@@ -175,8 +176,29 @@ def realign_pos(pos):
         read_end = read_idx
         seq = read.query_sequence[read_start:read_end]
 
-        cigar = align(ref, seq, cfg.args.sub_scores, cfg.args.hp_scores)
-        dump(ref, seq, cigar)
+        # if there's a substitution variant, alter reference
+        ref_base = ref[cfg.args.window]
+        hap = int(read.get_tag('HP'))-1
+        if hap < 0: # unphased
+            if gt[0] == gt[1]: # haplotype variants identical
+                if len(alleles[0]) == 1 and len(alleles[gt[0]]) == 1: # sub
+                    real_base = alleles[gt[0]]
+                else: 
+                    real_base = ref_base
+            else:
+                real_base = ref_base
+        else:
+            # TODO: combo of sub and deletion will fail here (uncommon, ignoring)
+            if len(alleles[0]) == 1 and len(alleles[gt[hap]]) == 1: # hap sub
+                real_base = alleles[gt[hap]]
+            else:
+                real_base = ref_base
+        orig_ref = ref
+        ref = ref[:cfg.args.window] + real_base + ref[cfg.args.window+1:]
+        
+        cigar = align(ref, seq, orig_ref, cfg.args.sub_scores, cfg.args.hp_scores)
+        # print(pos, orig_ref)
+        # dump(ref, seq, cigar)
         alignments.append((read.query_name, pos, cigar))
 
     with cfg.pos_count.get_lock():
