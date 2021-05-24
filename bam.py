@@ -181,7 +181,7 @@ def realign_pos(data):
         hap = int(read.get_tag('HP'))-1
         if hap < 0: # unphased
             if gt[0] == gt[1]: # haplotype variants identical
-                if len(alleles[0]) == 1 and len(alleles[gt[0]]) == 1: # sub
+                if not None in gt and len(alleles[0]) == 1 and len(alleles[gt[0]]) == 1: # sub
                     real_base = alleles[gt[0]]
                 else: 
                     real_base = ref_base
@@ -189,22 +189,21 @@ def realign_pos(data):
                 real_base = ref_base
         else:
             # TODO: combo of sub and deletion will fail here (uncommon, ignoring)
-            if len(alleles[0]) == 1 and len(alleles[gt[hap]]) == 1: # hap sub
+            if not None in gt and len(alleles[0]) == 1 and len(alleles[gt[hap]]) == 1: # hap sub
                 real_base = alleles[gt[hap]]
             else:
                 real_base = ref_base
+        # print(f"position {pos}, hap {hap}, gt {gt}, alleles {alleles}, called {real_base}")
         orig_ref = ref
         ref = ref[:cfg.args.window] + real_base + ref[cfg.args.window+1:]
         
         cigar = align(ref, seq, orig_ref, cfg.args.sub_scores, cfg.args.hp_scores)
-        # print(pos, orig_ref)
         # dump(ref, seq, cigar)
         alignments.append((read.query_name, pos, cigar))
 
     with cfg.pos_count.get_lock():
         cfg.pos_count.value += 1
         print(f"\r    {cfg.pos_count.value} positions processed.", end='', flush=True)
-
 
     return alignments
 

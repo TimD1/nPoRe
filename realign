@@ -4,7 +4,14 @@ DIR="/x/gm24385/chr19"
 BC="guppy_4_0_11"
 BAM="$DIR/$BC/deep_variant/intermediate_files/MARGIN_PHASED.PEPPER_SNP_MARGIN.haplotagged.bam"
 REF="$DIR/ref/GCA_000001405.15_GRCh38_no_alt_analysis_set.fasta"
-VCF="$DIR/$BC/deep_variant/intermediate_files/PEPPER_HP_OUPUT.vcf.gz"
+VCF="$DIR/$BC/deep_variant/deepvariant.phased.vcf.gz"
 
-python3 realign.py $BAM $REF $VCF realigned.bam
+# run ReAligner
+python3 realign.py \
+    $BAM \
+    $REF \
+    $VCF \
+    realigned.bam
+
+# update MD tags
 ~/NanoporeScripts/align realigned.bam $REF
