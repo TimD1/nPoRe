@@ -199,7 +199,8 @@ def realign_pos(data):
         
         cigar = align(ref, seq, orig_ref, cfg.args.sub_scores, cfg.args.hp_scores)
         # dump(ref, seq, cigar)
-        alignments.append((read.query_name, pos, cigar))
+        new_cigar = standardize_cigar(cigar, ref, seq)
+        alignments.append((read.query_name, pos, new_cigar))
 
     with cfg.pos_count.get_lock():
         cfg.pos_count.value += 1

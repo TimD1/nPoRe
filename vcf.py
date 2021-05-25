@@ -10,7 +10,7 @@ def get_positions(vcf_filename: str, min_qual: int, window: int):
     # get candidate variants from VCF
     vcf = pysam.VariantFile(vcf_filename, 'r')
     all_pos = []
-    for record in vcf.fetch():
+    for record in vcf.fetch('chr19', 40000000, 41000000):
         if record.qual > min_qual:
             gt = None
             for sample in record.samples:

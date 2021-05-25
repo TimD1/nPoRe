@@ -200,16 +200,17 @@ def align(ref, query, orig_ref, sub_scores, hp_scores, indel_start=5, indel_exte
 
     # initialize first row/col of matrix
     matrix = np.zeros((typs, rows, cols, dims))
+    C = 0.05
     for typ in range(typs):
         for row in range(1, rows):
             ins_val = indel_start if row == 1 else \
-                    matrix[typ, row-1, 0, VALUE] + indel_extend
+                    matrix[typ, row-1, 0, VALUE] + indel_extend + C*row
             matrix[typ, row, 0, :] = [ins_val, INS, 0]
 
     for typ in range(typs):
         for col in range(1, cols):
             del_val = indel_start if col == 1 else \
-                    matrix[typ, 0, col-1, VALUE] + indel_extend
+                    matrix[typ, 0, col-1, VALUE] + indel_extend + C*col
             matrix[typ, 0, col, :] = [del_val, DEL, 0]
 
     # calculate matrix
@@ -221,13 +222,13 @@ def align(ref, query, orig_ref, sub_scores, hp_scores, indel_start=5, indel_exte
             # UPDATE INS MATRIX
             # continue INS
             ins_run = matrix[INS, row-1, col, RUNLEN] + 1
-            ins_val = matrix[INS, row-1, col, VALUE] + indel_extend
+            ins_val = matrix[INS, row-1, col, VALUE] + indel_extend + C*(row+col)
             matrix[INS, row, col, :] = [ins_val, INS, ins_run]
 
             # start INS
             min_val = ins_val
             for typ in [SUB, LHP, SHP]:
-                start_val = matrix[typ, row-1, col, VALUE] + indel_start
+                start_val = matrix[typ, row-1, col, VALUE] + indel_start + C*(row+col)
                 if start_val < min_val:
                     min_val = start_val
                     matrix[INS, row, col, :] = [min_val, typ, 1]
@@ -236,13 +237,13 @@ def align(ref, query, orig_ref, sub_scores, hp_scores, indel_start=5, indel_exte
             # UPDATE DEL MATRIX
             # continue DEL
             del_run = matrix[DEL, row, col-1, RUNLEN] + 1
-            del_val = matrix[DEL, row, col-1, VALUE] + indel_extend
+            del_val = matrix[DEL, row, col-1, VALUE] + indel_extend + C*(row+col)
             matrix[DEL, row, col, :] = [del_val, DEL, del_run]
 
             # start DEL
             min_val = del_val
             for typ in [SUB, LHP, SHP]:
-                start_val = matrix[typ, row, col-1, VALUE] + indel_start
+                start_val = matrix[typ, row, col-1, VALUE] + indel_start + C*(row+col)
                 if start_val < min_val:
                     min_val = start_val
                     matrix[DEL, row, col, :] = [min_val, typ, 1]
@@ -255,7 +256,7 @@ def align(ref, query, orig_ref, sub_scores, hp_scores, indel_start=5, indel_exte
                 # continue LHP
                 lhp_run = int(matrix[LHP, row-1, col, RUNLEN] + 1)
                 lhp_val = matrix[LHP, row-lhp_run, col, VALUE] + \
-                        hp_indel_score(ref_hp_lens[ref_idx+1], lhp_run, hp_scores)
+                        hp_indel_score(ref_hp_lens[ref_idx+1], lhp_run, hp_scores) + C*(row+col)
                 matrix[LHP, row, col, :] = [lhp_val, LHP, lhp_run]
 
                 # start LHP
@@ -263,7 +264,7 @@ def align(ref, query, orig_ref, sub_scores, hp_scores, indel_start=5, indel_exte
                 min_val = lhp_val
                 for typ in [SUB, DEL, INS, SHP]:
                     start_val = matrix[typ, row-1, col, VALUE] + \
-                            hp_indel_score(ref_hp_lens[ref_idx+1], 1, hp_scores)
+                            hp_indel_score(ref_hp_lens[ref_idx+1], 1, hp_scores) + C*(row+col)
                     if start_val < min_val:
                         min_val = start_val
                         matrix[LHP, row, col, :] = [min_val, typ, 1]
@@ -280,7 +281,7 @@ def align(ref, query, orig_ref, sub_scores, hp_scores, indel_start=5, indel_exte
                 # continue SHP
                 shp_run = int(matrix[SHP, row, col-1, RUNLEN] + 1)
                 shp_val = matrix[SHP, row, col-shp_run, VALUE] + \
-                        hp_indel_score(ref_hp_lens[ref_idx], -shp_run, hp_scores)
+                        hp_indel_score(ref_hp_lens[ref_idx], -shp_run, hp_scores) + C*(row+col)
                 matrix[SHP, row, col, :] = [shp_val, SHP, shp_run]
 
                 # start SHP
@@ -288,7 +289,7 @@ def align(ref, query, orig_ref, sub_scores, hp_scores, indel_start=5, indel_exte
                 min_val = shp_val
                 for typ in [SUB, DEL, INS, LHP]:
                     start_val = matrix[typ, row, col-1, VALUE] + \
-                        hp_indel_score(ref_hp_lens[ref_idx], -1, hp_scores)
+                        hp_indel_score(ref_hp_lens[ref_idx], -1, hp_scores) + C*(row+col)
                     if start_val < min_val:
                         min_val = start_val
                         matrix[SHP, row, col, :] = [min_val, typ, 1]
@@ -305,6 +306,8 @@ def align(ref, query, orig_ref, sub_scores, hp_scores, indel_start=5, indel_exte
                             base_idx( query[query_idx] ), 
                             base_idx( ref[ref_idx] ) 
                     ]
+            if base_idx(query[query_idx]) != base_idx(ref[ref_idx]):
+                sub_val += C*(row+col)
             min_val = sub_val
             matrix[SUB, row, col, :] = [min_val, SUB, 0]
 
