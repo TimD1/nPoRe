@@ -75,10 +75,12 @@ def collapse_cigar(extended_cigar):
 
 
 
-def push_dels_left(cigar, ref, seq):
+def push_dels_left(cigar, ref):
+    ''' Push CIGAR deletions leftwards. '''
 
 
-    ref_ptr, seq_ptr, cig_ptr = 0, 0, 0
+    ref_ptr, cig_ptr = 0, 0
+    diff = False
     while cig_ptr < len(cigar):
 
         # get deletion length
@@ -92,17 +94,50 @@ def push_dels_left(cigar, ref, seq):
             del_len = 0
 
         # iterate, pushing shorter prefixes of deletion left
-        while del_len > 0:
+        shift_len = del_len
+        ref_del_ptr = ref_ptr
+        cig_del_ptr = cig_ptr
 
+        # while not at CIGAR start and we still have deletions to push
+        while cig_del_ptr > 0 and shift_len > 0:
+
+            # push deletion as far left as possible (keeping ref sequence same)
+            nshifts = 0
+            while ref_del_ptr-nshifts > 0 and \
+                    ref[ref_del_ptr-nshifts-1] == ref[ref_del_ptr-nshifts-1 + shift_len] and \
+                    cigar[cig_del_ptr-nshifts-1] == '=':
+                nshifts += 1
+                diff = True
+            
+            # update CIGAR, try shorter prefix
+            print(cigar)
+            cigar = (
+                    cigar[                      : cig_del_ptr-nshifts] +   # prefix
+                    cigar[cig_del_ptr           : cig_del_ptr+shift_len] + # dels (shifted left)
+                    cigar[cig_del_ptr-nshifts   : cig_del_ptr] +           # equals (shifted right)
+                    cigar[cig_del_ptr+shift_len : ]                        # suffix
+            )
+
+            # print(' '*(cig_ptr) + '| cig_ptr')
+            # print(' '*(cig_del_ptr) + '| cig_del_ptr')
+            # print(cigar, f'{del_len}D total, {shift_len}D shifted back {nshifts}')
+            # print(' '*(ref_ptr) + '| ref_ptr')
+            # print(' '*(ref_del_ptr) + '| ref_del_ptr')
+            # print(ref)
+            # print(' ')
+
+            cig_del_ptr -= nshifts
+            ref_del_ptr -= nshifts
+            shift_len -= 1
 
         # update pointers
+        cig_ptr += max(1, del_len)
         if op == 'M' or op == 'X' or op == '=':
-            ref_ptr = ref_ptr + 1
-            seq_ptr = seq_ptr + 1
+            ref_ptr += 1
         elif op == 'D':
-            ref_ptr = ref_ptr + 1
-        elif op == 'I':
-            seq_ptr = seq_ptr + 1
+            ref_ptr += del_len
+
+    return cigar, diff
 
 
 
@@ -114,5 +149,7 @@ def standardize_cigar(cigar, ref, seq):
 
     while diff: # loop until CIGAR is stable
 
-        cigar, diff = push_dels_left(cigar, ref, seq)
+        cigar, diff = push_dels_left(cigar, ref)
+
+    return cigar
 
