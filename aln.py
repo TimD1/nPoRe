@@ -9,7 +9,31 @@ from numba import njit
 import scipy.ndimage as ndimage
 
 import cfg
-from cig import *
+
+def collapse_cigar(extended_cigar):
+    ''' 
+    Converts extended CIGAR ops list to normal CIGAR string. 
+    'DMMMII' -> '1D3M2I'
+    '''
+    count = 1
+    last = None
+    groups = []
+    for op in extended_cigar:
+        if last and op == last:
+            count += 1
+        elif last:
+            groups.append((count, last))
+            count = 1
+        last = op
+
+    if last:
+        groups.append((count, last))
+
+    out = ''
+    for num, op in groups:
+        out += '%s%s' % (num, op)
+    return out
+
 
 
 @njit()
@@ -416,4 +440,4 @@ def dump(ref, seq, cigar):
     print(f"REF: {ref_str} len: {len(ref)} ciglen: {sum([op in 'XD=M' for op in cigar])}\n"
           f"     {cig_str}\n"
           f"SEQ: {seq_str} len: {len(seq)} ciglen: {sum([op in 'SXI=M' for op in cigar])}\n"
-          f"Cigar: {collapse_cigar(cigar)}\n\n")
+          f"Cigar: {cigar}\n\n")

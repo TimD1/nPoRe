@@ -6,9 +6,10 @@ import matplotlib.pyplot as plt
 import os, re, itertools, sys
 
 import pysam
+from numba import njit
 
 import cfg
-from aln import *
+from aln import dump
 
 class Cigar():
     ''' Enum for pysam's cigartuples encoding.  '''
@@ -49,32 +50,7 @@ def extend_pysam_cigar(ops, counts):
 
 
 
-def collapse_cigar(extended_cigar):
-    ''' 
-    Converts extended CIGAR ops list to normal CIGAR string. 
-    'DMMMII' -> '1D3M2I'
-    '''
-    count = 1
-    last = None
-    groups = []
-    for op in extended_cigar:
-        if last and op == last:
-            count += 1
-        elif last:
-            groups.append((count, last))
-            count = 1
-        last = op
-
-    if last:
-        groups.append((count, last))
-
-    out = ''
-    for num, op in groups:
-        out += '%s%s' % (num, op)
-    return out
-
-
-
+@njit()
 def push_dels_left(cigar, ref):
     ''' Push CIGAR deletions leftwards. '''
 
@@ -101,7 +77,7 @@ def push_dels_left(cigar, ref):
         # while not at CIGAR start and we still have deletions to push
         while cig_del_ptr > 0 and shift_len > 0:
 
-            # push deletion as far left as possible (keeping ref sequence same)
+            # push deletion as far left as possible (keeping ref same)
             nshifts = 0
             while ref_del_ptr-nshifts > 0 and \
                     ref[ref_del_ptr-nshifts-1] == ref[ref_del_ptr-nshifts-1 + shift_len] and \
@@ -110,7 +86,7 @@ def push_dels_left(cigar, ref):
                 diff = True
             
             # update CIGAR, try shorter prefix
-            print(cigar)
+            # print(cigar)
             cigar = (
                     cigar[                      : cig_del_ptr-nshifts] +   # prefix
                     cigar[cig_del_ptr           : cig_del_ptr+shift_len] + # dels (shifted left)
@@ -141,15 +117,163 @@ def push_dels_left(cigar, ref):
 
 
 
+@njit()
+def push_inss_left(cigar, seq):
+    ''' Push CIGAR insertions leftwards. '''
+
+    seq_ptr, cig_ptr = 0, 0
+    diff = False
+    while cig_ptr < len(cigar):
+
+        # get insertion length
+        op = cigar[cig_ptr]
+        if op == 'I':
+            ins_len = 1
+            while cig_ptr+ins_len < len(cigar) and \
+                    cigar[cig_ptr+ins_len] == 'I':
+                ins_len += 1
+        else:
+            ins_len = 0
+
+        # iterate, pushing shorter prefixes of insertions left
+        shift_len = ins_len
+        seq_ins_ptr = seq_ptr
+        cig_ins_ptr = cig_ptr
+
+        # while not at CIGAR start and we still have insertions to push
+        while cig_ins_ptr > shift_len and shift_len > 0:
+
+            # push insertion as far left as possible (keeping seq same)
+            nshifts = 0
+            while seq_ins_ptr - nshifts*shift_len >= 0 and \
+                    seq[seq_ins_ptr - nshifts*shift_len : seq_ins_ptr - (nshifts-1)*shift_len] == \
+                    seq[seq_ins_ptr : seq_ins_ptr + shift_len] and \
+                    'D' not in cigar[cig_ins_ptr - nshifts*shift_len : \
+                            cig_ins_ptr - (nshifts-1)*shift_len] and \
+                    'I' not in cigar[cig_ins_ptr - nshifts*shift_len : \
+                            cig_ins_ptr - (nshifts-1)*shift_len]:
+                nshifts += 1
+                diff = True
+            
+            # update CIGAR, try shorter prefix
+            if diff:
+                # print(cigar)
+                cigar = (
+                        cigar[ : cig_ins_ptr-nshifts*shift_len] + # prefix
+                        cigar[cig_ins_ptr : cig_ins_ptr+shift_len] + # inss (shifted left)
+                        cigar[cig_ins_ptr-nshifts*shift_len : cig_ins_ptr] + # equals (shifted right)
+                        cigar[cig_ins_ptr+shift_len : ] # suffix
+                )
+
+                # print(' '*(cig_ptr) + '| cig_ptr')
+                # print(' '*(cig_ins_ptr) + '| cig_ins_ptr')
+                # print(cigar, f'{ins_len}I total, {shift_len}I shifted back {nshifts}')
+                # print(' '*(seq_ptr) + '| seq_ptr')
+                # print(' '*(seq_ins_ptr) + '| seq_ins_ptr')
+                # print(seq)
+                # print(' ')
+
+            cig_ins_ptr -= nshifts*shift_len
+            seq_ins_ptr -= nshifts*shift_len
+            shift_len -= 1
+
+        # update pointers
+        cig_ptr += max(1, ins_len)
+        if op == 'M' or op == 'X' or op == '=':
+            seq_ptr += 1
+        elif op == 'I':
+            seq_ptr += ins_len
+
+    return cigar, diff
+
+
+
+def subs_to_indels(cigar):
+    return cigar.replace('X', 'DI')
+
+
+
+@njit()
+def push_inss_thru_dels(cigar):
+    ''' Enable CIGAR insertions to be pushed leftward through deletions. '''
+
+    diff = False
+    for i in range(len(cigar)-1):
+        if cigar[i] == 'D' and cigar[i+1] == 'I':
+
+            # count adjacent deletions
+            del_idx = i-1
+            while del_idx >= 0 and cigar[del_idx] == 'D':
+                del_idx -= 1
+            dels = i - del_idx
+
+            # count adjacent insertions
+            ins_idx = i+1
+            while ins_idx < len(cigar) and cigar[ins_idx] == 'I':
+                ins_idx += 1
+            inss = ins_idx - i - 1
+
+            cigar = (
+                    cigar[:del_idx+1] + inss*'I' + dels*'D' + cigar[ins_idx:]
+            )
+
+            diff = True
+    return cigar, diff
+
+
+
+def seq_len(cigar):
+    length = 0
+    for op in cigar:
+        if op in 'SXI=M':
+            length += 1
+    return length
+
+def ref_len(cigar):
+    length = 0
+    for op in cigar:
+        if op in 'XD=M':
+            length += 1
+    return length
+
+
 
 def standardize_cigar(cigar, ref, seq):
     ''' Try to force all INDELs into beginning of repetitive region. '''
 
-    diff = True
+    cigar0 = subs_to_indels(cigar)
 
+    seq_lens = [len(seq), seq_len(cigar), seq_len(cigar0)]
+    ref_lens = [len(ref), ref_len(cigar), ref_len(cigar0)]
+    if not all([l == ref_lens[0] for l in ref_lens]) or \
+            not all([l == seq_lens[0] for l in seq_lens]):
+        print("\nSUB ERROR")
+        dump(ref, seq, cigar)
+        dump(ref, seq, cigar0)
+
+    diff = True
     while diff: # loop until CIGAR is stable
 
-        cigar, diff = push_dels_left(cigar, ref)
+        cigar1, diff1 = push_dels_left(cigar0, ref)
+        if ref_len(cigar1) != len(ref) or seq_len(cigar1) != len(seq):
+            print("\nDEL ERROR")
+            dump(ref, seq, cigar0)
+            dump(ref, seq, cigar1)
 
-    return cigar
+        cigar2, diff2 = push_inss_left(cigar1, seq)
+        if ref_len(cigar2) != len(ref) or seq_len(cigar2) != len(seq):
+            print("\nINS ERROR")
+            dump(ref, seq, cigar1)
+            dump(ref, seq, cigar2)
+
+        cigar3, diff3 = push_inss_thru_dels(cigar2)
+        if ref_len(cigar3) != len(ref) or seq_len(cigar3) != len(seq):
+            print("\nSWAP ERROR")
+            dump(ref, seq, cigar2)
+            dump(ref, seq, cigar3)
+
+        diff = diff1 or diff2 or diff3
+        cigar0 = cigar3
+
+    return cigar0
 
