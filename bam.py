@@ -11,35 +11,76 @@ import cfg
 from aln import *
 from cig import *
 
-def realign_bam(data):
+def realign_bam():
     '''
-    Wrapper for multi-threaded read re-alignment at each BAM position.
+    Wrapper for multi-threaded read re-alignment.
     '''
 
-    print('    > getting all CIGAR strings')
-    cfg.cigars, cfg.starts = get_cigars(cfg.args.bam)
-    
-    # calculate all realignments for specified positions
-    print('    > computing subread realignments')
-    cfg.pos_count.value = 0
+    # convert BAM to workable mp format: [(id, ctg, pos, cigar, ref, seq)...]
+    print('    > extracting read data from BAM')
+    read_data = get_read_data()
+    exit(0)
+
+    # update 'ref' based on SUB variant calls (optional)
+    if cfg.args.splice_subs:
+        print('    > splicing subs into reference')
+        # with mp.Pool() as pool:
+            # read_data = pool.map(splice_subs_into_ref(read_data)
+
+    # align 'seq' to 'ref', update 'cigar'
+    print('    > computing read realignments')
     with mp.Pool() as pool:
-        subread_alignments = pool.map(realign_pos, data)
-    subread_alignments = list(itertools.chain(*subread_alignments))
+        read_data = pool.map(realign_read, read_data)
 
-    # store results in dict, grouped by read
-    print('\n    > sorting subread realignments by read')
-    read_alignments = defaultdict(list)
-    for read, pos, cigar in subread_alignments:
-        read_alignments[read].append((pos, cigar))
-    print(f'    {len(read_alignments)} reads found.')
+    # standardize 'cigar' format, replace subs with indels
+    if cfg.args.indels_only:
+        print('    > converting to standard INDEL format')
+        # with mp.Pool() as pool:
+        #     read_data = pool.map(standardize_indels, read_data)
 
-    # update per-read CIGAR strings in parallel
-    print('    > splicing together realignments')
-    with mp.Pool() as pool:
-        read_alignments = pool.map(splice_realignments, 
-                list(read_alignments.items()))
+    return read_data
+   
 
-    return read_alignments
+
+def get_read_data():
+
+    # count reads
+    bam = pysam.AlignmentFile(cfg.args.bam, 'rb')
+    reads = None
+    if cfg.args.contig:
+        reads = bam.fetch(
+                    cfg.args.contig, 
+                    cfg.args.contig_beg, 
+                    cfg.args.contig_end)
+    else:
+        reads = bam.fetch()
+    nreads = sum(1 for _ in reads)
+
+    # get all reads in region of interest
+    if cfg.args.contig:
+        reads = bam.fetch(
+                    cfg.args.contig, 
+                    cfg.args.contig_beg, 
+                    cfg.args.contig_end)
+    else:
+        reads = bam.fetch()
+
+    read_data = []
+    rds = 0
+    print(f'\r        0 of {nreads} reads processed.', end='', flush=True)
+    for read in reads:
+        read_data.append((
+            read.query_name,
+            read.reference_name,
+            read.reference_start,
+            read.cigarstring,
+            read.get_reference_sequence().upper(),
+            read.query_sequence.upper()
+        ))
+        rds += 1
+        print(f'\r        {rds} of {nreads} reads processed.', end='', flush=True)
+
+    return read_data
 
 
     
@@ -236,7 +277,7 @@ def write_results(alignments, outfile):
              }
     with pysam.Samfile(outfile, 'wb', header=header) as fh:
 
-        for read_id, cigar in alignments:
+        for read_id, pos, cigar, ref, seq in alignments:
 
             # find corresponding read in original BAM
             try:
@@ -281,7 +322,7 @@ def get_ranges(start, stop):
 
 def get_confusion_matrices():
     ''' Load cached CMs if they exist. '''
-    if not cfg.args.force and \
+    if not cfg.args.recalc_cms and \
             os.path.isfile(f'{cfg.args.stats_dir}/subs_cm.npy') and \
             os.path.isfile(f'{cfg.args.stats_dir}/hps_cm.npy'):
         print("> loading confusion matrices\r", end='')

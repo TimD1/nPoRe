@@ -17,24 +17,31 @@ def argparser():
             add_help = False
     )
 
+    # mandatory args
     parser.add_argument("bam")
     parser.add_argument("ref")
     parser.add_argument("vcf")
     parser.add_argument("out")
 
-    parser.add_argument("--contig", default="chr19")
+    # region of interest
+    parser.add_argument("--contig", type=str, default="")
     parser.add_argument("--contig_beg", type=int, default=0)
     parser.add_argument("--contig_end", type=int, default=55000000)
 
+    # algorithm parameters
     parser.add_argument("--min_qual", type=int, default=0)
     parser.add_argument("--max_hp", type=int, default=100)
     parser.add_argument("--window", type=int, default=25)
     parser.add_argument("--chunk_width", type=int, default=10000)
 
+    # path
     parser.add_argument("--stats_dir", default="./stats")
 
+    # boolean options
     parser.add_argument("--plot", action="store_true")
-    parser.add_argument("--force", action="store_true")
+    parser.add_argument("--recalc_cms", action="store_true")
+    parser.add_argument("--splice_subs", action="store_true")
+    parser.add_argument("--indels_only", action="store_true")
 
     return parser
 
@@ -59,12 +66,8 @@ def main():
         print("> plotting score matrices")
         plot_hp_score_matrix(cfg.args.hp_scores)
 
-    print("\n> getting DeepVariant positions")
-    positions = get_positions(cfg.args.vcf, cfg.args.min_qual, cfg.args.window)
-    print(f"{len(positions)} positions found.")
-
     print("\n> computing BAM realignments")
-    alignments = realign_bam(positions)
+    alignments = realign_bam()
 
     print(f"\n\n> saving results to '{cfg.args.out}'")
     write_results(alignments, cfg.args.out)
