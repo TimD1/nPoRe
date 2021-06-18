@@ -308,61 +308,6 @@ def get_confusion_matrices():
 
 
 
-def fit_curve(hps):
-
-    # merge complement bps and convert cm to percentages
-    hps = hps.sum(axis=0)
-    pct = (hps+0.00001) / (1 + np.sum(hps, axis=1))[:, np.newaxis]
-
-    # 0: PERCENT HP CORRECT
-    # plot percentage correctness (by hp length)
-    fig, ax = plt.subplots(3, 1, figsize=(15,25))
-    hp_lens = range(1, 81) # at most max_hp-1
-    all_hp_lens = range(cfg.args.max_hp)
-    pct_correct = [pct[i,i] for i in hp_lens]
-    ax[0].plot(hp_lens, pct_correct, color='green', linestyle='', marker='o', alpha=0.5)
-    ax[0].set_xlabel('Actual Homopolymer Length')
-    ax[0].set_ylabel('Log Percent Correct')
-
-    # show polynomial fit
-    pct_cor_coeff = np.polyfit(hp_lens, pct_correct, 3)
-    pct_cor_fit = np.poly1d(pct_cor_coeff)
-    ax[0].plot(all_hp_lens, pct_cor_fit(all_hp_lens), color='k', linestyle=':', alpha=0.5)
-
-    # 1: HP LENGTH MEAN
-    # overwrite correct hp length (by interpolating), for separate distribution
-    for l in hp_lens:
-        pct[l,l] = (pct[l,l-1] + pct[l,l+1]) / 2
-
-    # estimate gaussian distributions for hp lengths
-    means = [np.dot(pct[l], np.array(range(cfg.args.max_hp))) for l in hp_lens]
-    ax[1].plot(hp_lens, means, color='b', linestyle='', marker='o', alpha=0.5)
-    mean_coeff = np.polyfit(hp_lens, means, 2)
-    mean_fit = np.poly1d(mean_coeff)
-    ax[1].plot(all_hp_lens, mean_fit(all_hp_lens), color='k', linestyle=':', alpha=0.5)
-    ax[1].plot(all_hp_lens, all_hp_lens, color='r', linestyle='--', alpha=0.5)
-    ax[1].set_xlabel('Actual Homopolymer Length')
-    ax[1].set_ylabel('Mean Length Called')
-
-    # 2: HP LENGTH STDDEV
-    stds = []
-    for l in hp_lens:
-        vals = []
-        for i in range(cfg.args.max_hp):
-            vals.extend(int(1000*pct[l,i])*[i])
-        stds.append(np.std(vals))
-    ax[2].plot(hp_lens, stds, color='g', linestyle='', marker='o', alpha=0.5)
-    std_coeff = np.polyfit(hp_lens, stds, 3)
-    std_fit = np.poly1d(std_coeff)
-    ax[2].plot(all_hp_lens, std_fit(all_hp_lens), color='k', linestyle=':', alpha=0.5)
-    ax[2].set_xlabel('Actual Homopolymer Length')
-    ax[2].set_ylabel('Standard Deviation of Length Called')
-
-    plt.tight_layout()
-    plt.savefig(f'{cfg.args.stats_dir}/best_fit.png', dpi=200)
-
-
-
 def plot_dists(hps):
     hps = np.sum(hps, axis=0)
     for l in range(cfg.args.max_hp):

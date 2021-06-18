@@ -52,9 +52,6 @@ def main():
         print("\n> plotting distributions")
         plot_dists(hps)
 
-        print("\n> plotting parameter fitting")
-        fit_curve(hps)
-
     print("\n> calculating score matrices")
     cfg.args.sub_scores, cfg.args.hp_scores = calc_score_matrices(subs, hps)
 
