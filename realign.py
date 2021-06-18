@@ -50,7 +50,7 @@ def main():
         plot_confusion_matrices(subs, hps)
 
         print("\n> plotting distributions")
-        plot_dists(hps)
+        plot_hp_len_dists(hps)
 
     print("\n> calculating score matrices")
     cfg.args.sub_scores, cfg.args.hp_scores = calc_score_matrices(subs, hps)
@@ -58,7 +58,6 @@ def main():
     if cfg.args.plot:
         print("> plotting score matrices")
         plot_hp_score_matrix(cfg.args.hp_scores)
-        show_scores(cfg.args.hp_scores)
 
     print("\n> getting DeepVariant positions")
     positions = get_positions(cfg.args.vcf, cfg.args.min_qual, cfg.args.window)

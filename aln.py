@@ -134,6 +134,19 @@ def calc_score_matrices(subs, hps):
 
 def plot_hp_score_matrix(hps, prefix="score_mat"):
 
+    # confusion matrix
+    max_hp = 20
+    plt.figure(figsize=(15,15))
+    plt.matshow(hps[:max_hp,:max_hp], cmap=plt.cm.Reds, alpha=0.5)
+    for i in range(max_hp):
+        for j in range(max_hp):
+            plt.text(x=j, y=i, s=f'{hps[j,i]:.1f}', fontsize=7, va='center', ha='center')
+    plt.xlabel('Predicted')
+    plt.ylabel('Actual')
+    plt.title('Homopolymer Score Matrix')
+    plt.savefig(f'{cfg.args.stats_dir}/{prefix}_scores.png', dpi=300)
+    plt.close()
+
     # surface plot
     x, y = np.meshgrid(range(cfg.args.max_hp), range(cfg.args.max_hp))
     fig = plt.figure(figsize=(20,10))
@@ -143,6 +156,7 @@ def plot_hp_score_matrix(hps, prefix="score_mat"):
     ax2.plot_trisurf(-x.flatten(), -y.flatten(), hps.flatten(), cmap='RdYlGn_r', edgecolor='none')
     plt.tight_layout()
     plt.savefig(f'{cfg.args.stats_dir}/{prefix}_surface.png', dpi=200)
+    plt.close()
 
     # contour plot
     plt.figure(figsize=(15,15))
@@ -151,6 +165,7 @@ def plot_hp_score_matrix(hps, prefix="score_mat"):
     plt.ylabel('Actual Homopolymer Length')
     plt.tight_layout()
     plt.savefig(f'{cfg.args.stats_dir}/{prefix}_contour.png', dpi=200)
+    plt.close()
 
 
 

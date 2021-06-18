@@ -308,7 +308,7 @@ def get_confusion_matrices():
 
 
 
-def plot_dists(hps):
+def plot_hp_len_dists(hps):
     hps = np.sum(hps, axis=0)
     for l in range(cfg.args.max_hp):
         fig, ax = plt.subplots(1, 1, figsize=(10,10))
@@ -318,21 +318,6 @@ def plot_dists(hps):
         plt.tight_layout()
         plt.savefig(f'{cfg.args.stats_dir}/hp{l}_dist.png', dpi=200)
         plt.close()
-
-
-
-def show_scores(hp_scores):
-    max_hp = 20
-    plt.figure(figsize=(15,15))
-    plt.matshow(hp_scores[:max_hp,:max_hp], cmap=plt.cm.Reds, alpha=0.5)
-    for i in range(max_hp):
-        for j in range(max_hp):
-            plt.text(x=j, y=i, s=f'{hp_scores[j,i]:.1f}', fontsize=7, va='center', ha='center')
-    plt.xlabel('Predicted')
-    plt.ylabel('Actual')
-    plt.title('Homopolymer Score Matrix')
-    plt.savefig(f'{cfg.args.stats_dir}/hp_scores.png', dpi=300)
-    plt.close()
 
 
 
