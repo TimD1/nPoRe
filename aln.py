@@ -237,7 +237,6 @@ def align(ref, seq, orig_ref, cigar, sub_scores, hp_scores,
     ''' Perform alignment. '''
 
     # convert CIGAR so that each movement is row+1 or col+1, enables easy banding
-    # cigar, seq = trim_softclips(orig_cigar, orig_seq)
     cigar = expand_cigar(cigar)
     cigar = cigar.replace('X','DI').replace('=','DI') \
             .replace('M','DI').replace('S','')

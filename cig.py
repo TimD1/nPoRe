@@ -57,46 +57,6 @@ def expand_cigar(cigar):
 
 
 
-@njit()
-def trim_softclips(orig_cigar, seq):
-
-    # trim start
-    count = 0
-    seq_pre_trim = 0
-    cig_pre_trim = 0
-    cig_idx = 0
-    for char in orig_cigar:
-        cig_idx += 1
-        if char in '0123456789':
-            count = count * 10 + ord(char) - ord('0')
-        elif char == 'S':
-            seq_pre_trim = count
-            cig_pre_trim = cig_idx
-        else:
-            break
-    seq = seq[seq_pre_trim:]
-    cigar = orig_cigar[cig_pre_trim:]
-
-    # trim end as well
-    cig_idx = 0
-    count = 0
-    if cigar[-1] == 'S':
-        for char in cigar[::-1]:
-            if char == 'S':
-                cig_idx += 1
-                continue
-            elif char in '0123456789':
-                cig_idx += 1
-                count += 10 ** (cig_idx-2) * (ord(char) - ord('0'))
-            else:
-                break
-        cigar = cigar[:-cig_idx]
-        seq = seq[:-count]
-
-    return cigar, seq
-
-
-
 class Cigar():
     ''' Enum for pysam's cigartuples encoding.  '''
     M = 0
