@@ -16,8 +16,8 @@ def main():
 
     # create test cases
     ref_rd_cigs = []
-    ref_rd_cigs.append(("ACCAGGCAT", "ACCAGGCAT", "9="))
-    ref_rd_cigs.append(("ACCAGGCAT", "ACAGGCA", "2=1D5=1D"))
+    # ref_rd_cigs.append(("ACCAGGCAT", "ACCAGGCAT", "9="))
+    # ref_rd_cigs.append(("ACCAGGCAT", "ACAGGCA", "2=1D5=1D"))
     ref_rd_cigs.append(("ACCAGGCAT", "ACCCAGGAT", "1=1I5=1D2="))
 
     # load existing score mats

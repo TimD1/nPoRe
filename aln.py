@@ -190,38 +190,44 @@ def base_idx(base):
 
 
 @njit()
-def a_to_b(a_row, a_col, cigar, r):
+def get_inss_dels(cigar):
+    ''' CIGAR must contain only "I" and "D". '''
+    inss = np.zeros(len(cigar) + 1)
+    dels = np.zeros(len(cigar) + 1)
 
-    b_row = a_row + a_col
+    for i in range(len(cigar)):
 
-    row_offset, col_offset = 0, 0
-    for i in range(b_row):
-        if cigar[i] == 'I':
-            row_offset += 1
-        elif cigar[i] == 'D':
-            col_offset += 1
+        # verify CIGAR contains only INSs and DELs
+        is_ins = cigar[i] == 'I'
+        is_del = cigar[i] == 'D'
+        if not is_ins and not is_del:
+            print("ERROR: unexpected CIGAR type during 'get_inss_dels()'.")
+
+        # create DP arrays for fast lookups
+        if is_ins:
+            inss[i+1] = inss[i] + 1
         else:
-            print("ERROR: unexpected CIGAR type in a_to_b.", cigar)
+            inss[i+1] = inss[i]
 
-    b_col = row_offset - a_row + r
+        if is_del:
+            dels[i+1] = dels[i] + 1
+        else:
+            dels[i+1] = dels[i]
+    return inss, dels
 
+
+
+@njit()
+def a_to_b(a_row, a_col, inss, dels, r):
+    b_row = int(a_row + a_col)
+    b_col = int(inss[b_row] - a_row + r)
     return b_row, b_col
 
 
 
 @njit()
-def b_to_a(b_row, b_col, cigar, r):
-
-    row_offset, col_offset = 0, 0
-    for i in range(b_row):
-        if cigar[i] == 'I':
-            row_offset += 1
-        elif cigar[i] == 'D':
-            col_offset += 1
-        else:
-            print("ERROR: unexpected CIGAR type in b_to_a.", cigar)
-
-    return (row_offset + r - b_col, col_offset - r + b_col)
+def b_to_a(b_row, b_col, inss, dels, r):
+    return (int(inss[int(b_row)] + r - b_col), int(dels[int(b_row)] - r + b_col))
 
 
 
@@ -229,6 +235,13 @@ def b_to_a(b_row, b_col, cigar, r):
 def align(ref, seq, orig_ref, cigar, sub_scores, hp_scores, 
         indel_start=5, indel_extend=2, r = 3, C = 0.05, verbose=False):
     ''' Perform alignment. '''
+
+    # convert CIGAR so that each movement is row+1 or col+1, enables easy banding
+    # cigar, seq = trim_softclips(orig_cigar, orig_seq)
+    cigar = expand_cigar(cigar)
+    cigar = cigar.replace('X','DI').replace('=','DI') \
+            .replace('M','DI').replace('S','')
+    inss, dels = get_inss_dels(cigar)
 
     # set helpful constants
     a_rows = len(seq) + 1
@@ -251,23 +264,18 @@ def align(ref, seq, orig_ref, cigar, sub_scores, hp_scores,
     # precompute hompolymers
     ref_hp_lens = get_hp_lengths(ref)
 
-    # convert CIGAR so that each movement is row+1 or col+1, enables easy banding
-    cigar = expand_cigar(cigar)
-    cigar = cigar.replace('X','DI').replace('=','DI') \
-            .replace('M','DI').replace('S','I')
-
     matrix = np.zeros((typs, b_rows, b_cols, dims))
     # calculate matrix
     for b_row in range(b_rows):
         for b_col in range(b_cols):
 
             # precompute useful positions
-            a_row, a_col = b_to_a(b_row, b_col, cigar, r)
+            a_row, a_col = b_to_a(b_row, b_col, inss, dels, r)
             ref_idx = a_col - 1
             seq_idx = a_row - 1
-            b_top = a_to_b(a_row-1, a_col, cigar, r)
-            b_left = a_to_b(a_row, a_col-1, cigar, r)
-            b_diag = a_to_b(a_row-1, a_col-1, cigar, r)
+            b_top = a_to_b(a_row-1, a_col, inss, dels, r)
+            b_left = a_to_b(a_row, a_col-1, inss, dels, r)
+            b_diag = a_to_b(a_row-1, a_col-1, inss, dels, r)
 
             # skip cells out of range of original "A" matrix
             if a_row < 0 or a_col < 0 or a_row >= a_rows or a_col >= a_cols:
@@ -341,8 +349,8 @@ def align(ref, seq, orig_ref, cigar, sub_scores, hp_scores,
 
                 # continue LHP
                 lhp_run = int(matrix[LHP, b_top[0], b_top[1], RUNLEN] + 1)
-                lhp_val = matrix[LHP, a_to_b(a_row-lhp_run, a_col, cigar, r)[0], 
-                        a_to_b(a_row-lhp_run, a_col, cigar, r)[1], VALUE] + \
+                lhp_val = matrix[LHP, a_to_b(a_row-lhp_run, a_col, inss, dels, r)[0], 
+                        a_to_b(a_row-lhp_run, a_col, inss, dels, r)[1], VALUE] + \
                         hp_indel_score(ref_hp_lens[ref_idx+1], lhp_run, hp_scores) + \
                         C * (a_row + a_col)
                 matrix[LHP, b_row, b_col, :] = [lhp_val, LHP, lhp_run]
@@ -369,8 +377,8 @@ def align(ref, seq, orig_ref, cigar, sub_scores, hp_scores,
 
                 # continue SHP
                 shp_run = int(matrix[SHP, b_left[0], b_left[1], RUNLEN] + 1)
-                shp_val = matrix[SHP, a_to_b(a_row, a_col-shp_run, cigar, r)[0], \
-                        a_to_b(a_row, a_col-shp_run, cigar, r)[1], VALUE] + \
+                shp_val = matrix[SHP, a_to_b(a_row, a_col-shp_run, inss, dels, r)[0], \
+                        a_to_b(a_row, a_col-shp_run, inss, dels, r)[1], VALUE] + \
                         hp_indel_score(ref_hp_lens[ref_idx], -shp_run, hp_scores) + \
                         C * (a_row + a_col)
                 matrix[SHP, b_row, b_col, :] = [shp_val, SHP, shp_run]
@@ -415,13 +423,13 @@ def align(ref, seq, orig_ref, cigar, sub_scores, hp_scores,
     aln = ''
     path = []
     row, col = a_rows-1, a_cols-1
-    b_pos = a_to_b(row, col, cigar, r)
+    b_pos = a_to_b(row, col, inss, dels, r)
     old_typ = np.argmin(matrix[:, b_pos[0], b_pos[1], VALUE])
 
     # backtrack
     while row > 0 or col > 0:
         path.append((int(old_typ), row, col))
-        b_pos = a_to_b(row, col, cigar, r)
+        b_pos = a_to_b(row, col, inss, dels, r)
         val, new_typ, runlen = matrix[int(old_typ), b_pos[0], b_pos[1], :]
         op = ''
         if new_typ == LHP or new_typ == INS:   # each move is an insertion
@@ -462,7 +470,7 @@ def align(ref, seq, orig_ref, cigar, sub_scores, hp_scores,
                     s = seq[row-1]
 
                 for col in range(a_cols):
-                    b_pos = a_to_b(row, col, cigar, r)
+                    b_pos = a_to_b(row, col, inss, dels, r)
                     op = ops[int(matrix[typ, b_pos[0], b_pos[1], TYPE])]
                     if (typ, row, col) in path:
                         mark = '$'
@@ -500,7 +508,7 @@ def align(ref, seq, orig_ref, cigar, sub_scores, hp_scores,
                     s = str(row)
 
                 for col in range(b_cols):
-                    a_row, a_col = b_to_a(row, col, cigar, r)
+                    a_row, a_col = b_to_a(row, col, inss, dels, r)
                     op = ops[int(matrix[typ, row, col, TYPE])]
                     if (typ, row, col) in path:
                         mark = '$'
@@ -567,7 +575,13 @@ def dump(ref, seq, cigar):
             print(f"ERROR: unrecognized CIGAR operation '{op}' at cigar index {len(cig_str)}.")
             exit(1)
 
-    print(f"REF: {ref_str} len: {len(ref)} ciglen: {sum([op in 'XD=M' for op in cigar])}\n"
-          f"     {cig_str}\n"
-          f"SEQ: {seq_str} len: {len(seq)} ciglen: {sum([op in 'SXI=M' for op in cigar])}\n"
+    print(f"REF: len: {len(ref)} ciglen: {sum([op in 'XD=M' for op in cigar])}\n"
+          f"SEQ: len: {len(seq)} ciglen: {sum([op in 'SXI=M' for op in cigar])}\n"
           f"Cigar: {cigar}\n\n")
+
+    for x in range(0, len(cig_str), 80):
+        print(ref_str[x : x+80])
+        print(cig_str[x : x+80])
+        print(seq_str[x : x+80])
+        print(' ')
+

@@ -28,6 +28,7 @@ def realign_bam():
 
     # align 'seq' to 'ref', update 'cigar'
     print('\n    > computing read realignments')
+    with cfg.read_count.get_lock(): cfg.read_count.value = 0
     with mp.Pool() as pool:
         read_data = pool.map(realign_read, read_data)
 
@@ -75,7 +76,7 @@ def get_read_data():
             read.reference_start,
             read.cigarstring,
             read.get_reference_sequence().upper(),
-            read.query_sequence.upper()
+            read.query_alignment_sequence.upper(),
         ))
         rds += 1
         print(f'\r        {rds} of {nreads} reads processed.', end='', flush=True)
@@ -83,12 +84,18 @@ def get_read_data():
     return read_data
 
 
+
 def realign_read(read_data):
+
     read_id, ref_name, start, cigar, ref, seq = read_data
-
     new_cigar = align(ref, seq, ref, cigar, cfg.args.sub_scores, cfg.args.hp_scores)
+    final_cigar = collapse_cigar(new_cigar)
 
-    print(cigar, new_cigar)
+    with cfg.read_count.get_lock():
+        cfg.read_count.value += 1
+        print(f"\r        {cfg.read_count.value} reads realigned.", end='', flush=True)
+
+    return (read_id, ref_name, start, final_cigar, ref, seq)
 
 
     
@@ -285,7 +292,7 @@ def write_results(alignments, outfile):
              }
     with pysam.Samfile(outfile, 'wb', header=header) as fh:
 
-        for read_id, pos, cigar, ref, seq in alignments:
+        for read_id, refname, pos, cigar, ref, seq in alignments:
 
             # find corresponding read in original BAM
             try:
@@ -296,13 +303,14 @@ def write_results(alignments, outfile):
                 exit(1)
 
             # overwrite CIGAR string
+            print('\t', read_id, len(old_alignment.query_alignment_sequence), len(old_alignment.query_alignment_qualities), seq_len(expand_cigar(cigar)), len(seq))
             new_alignment = pysam.AlignedSegment()
             new_alignment.query_name      = old_alignment.query_name
-            new_alignment.query_sequence  = old_alignment.query_sequence
+            new_alignment.query_sequence  = old_alignment.query_alignment_sequence
             new_alignment.flag            = old_alignment.flag
             new_alignment.reference_start = old_alignment.reference_start
             new_alignment.mapping_quality = old_alignment.mapping_quality
-            new_alignment.query_qualities = old_alignment.query_qualities
+            new_alignment.query_qualities = old_alignment.query_alignment_qualities
             new_alignment.tags            = old_alignment.tags
             if new_alignment.has_tag('MD'):
                 new_alignment.set_tag('MD', None)
