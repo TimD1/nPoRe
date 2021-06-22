@@ -19,16 +19,15 @@ def realign_bam():
     # convert BAM to workable mp format: [(id, ctg, pos, cigar, ref, seq)...]
     print('    > extracting read data from BAM')
     read_data = get_read_data()
-    exit(0)
 
     # update 'ref' based on SUB variant calls (optional)
     if cfg.args.splice_subs:
         print('    > splicing subs into reference')
         # with mp.Pool() as pool:
-            # read_data = pool.map(splice_subs_into_ref(read_data)
+            # read_data = pool.map(splice_subs_into_ref(read_data))
 
     # align 'seq' to 'ref', update 'cigar'
-    print('    > computing read realignments')
+    print('\n    > computing read realignments')
     with mp.Pool() as pool:
         read_data = pool.map(realign_read, read_data)
 
@@ -65,6 +64,7 @@ def get_read_data():
     else:
         reads = bam.fetch()
 
+    # convert BAM to workable mp format: [(id, ctg, pos, cigar, ref, seq)...]
     read_data = []
     rds = 0
     print(f'\r        0 of {nreads} reads processed.', end='', flush=True)
@@ -81,6 +81,14 @@ def get_read_data():
         print(f'\r        {rds} of {nreads} reads processed.', end='', flush=True)
 
     return read_data
+
+
+def realign_read(read_data):
+    read_id, ref_name, start, cigar, ref, seq = read_data
+
+    new_cigar = align(ref, seq, ref, cigar, cfg.args.sub_scores, cfg.args.hp_scores)
+
+    print(cigar, new_cigar)
 
 
     

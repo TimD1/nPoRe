@@ -1,7 +1,3 @@
-#!/usr/bin/env python
-'''
-Simple Smith-Waterman aligner
-'''
 import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits import mplot3d
@@ -10,30 +6,7 @@ import scipy.ndimage as ndimage
 
 import cfg
 
-def collapse_cigar(extended_cigar):
-    ''' 
-    Converts extended CIGAR ops list to normal CIGAR string. 
-    'DMMMII' -> '1D3M2I'
-    '''
-    count = 1
-    last = None
-    groups = []
-    for op in extended_cigar:
-        if last and op == last:
-            count += 1
-        elif last:
-            groups.append((count, last))
-            count = 1
-        last = op
-
-    if last:
-        groups.append((count, last))
-
-    out = ''
-    for num, op in groups:
-        out += '%s%s' % (num, op)
-    return out
-
+from cig import *
 
 
 @njit()
@@ -217,13 +190,51 @@ def base_idx(base):
 
 
 @njit()
-def align(ref, query, orig_ref, sub_scores, hp_scores, indel_start=5, indel_extend=2, verbose=False):
+def a_to_b(a_row, a_col, cigar, r):
+
+    b_row = a_row + a_col
+
+    row_offset, col_offset = 0, 0
+    for i in range(b_row):
+        if cigar[i] == 'I':
+            row_offset += 1
+        elif cigar[i] == 'D':
+            col_offset += 1
+        else:
+            print("ERROR: unexpected CIGAR type in a_to_b.", cigar)
+
+    b_col = row_offset - a_row + r
+
+    return b_row, b_col
+
+
+
+@njit()
+def b_to_a(b_row, b_col, cigar, r):
+
+    row_offset, col_offset = 0, 0
+    for i in range(b_row):
+        if cigar[i] == 'I':
+            row_offset += 1
+        elif cigar[i] == 'D':
+            col_offset += 1
+        else:
+            print("ERROR: unexpected CIGAR type in b_to_a.", cigar)
+
+    return (row_offset + r - b_col, col_offset - r + b_col)
+
+
+
+@njit()
+def align(ref, query, orig_ref, cigar, sub_scores, hp_scores, 
+        indel_start=5, indel_extend=2, r = 5, verbose=False):
     ''' Perform alignment. '''
 
-    ref_hp_lens = get_hp_lengths(ref)
-
-    rows = len(query) + 1
-    cols = len(ref) + 1
+    # set helpful constants
+    a_rows = len(query) + 1
+    a_cols = len(ref) + 1
+    b_rows = len(query) + len(ref) + 1
+    b_cols = 2*r + 1
 
     dims = 3
     VALUE = 0
@@ -237,55 +248,90 @@ def align(ref, query, orig_ref, sub_scores, hp_scores, indel_start=5, indel_exte
     DEL = 3 # deletion
     SHP = 4 # shorten homopolymer
 
-    # initialize first row/col of matrix
-    matrix = np.zeros((typs, rows, cols, dims))
-    C = 0.05
-    for typ in range(typs):
-        for row in range(1, rows):
-            ins_val = indel_start if row == 1 else \
-                    matrix[typ, row-1, 0, VALUE] + indel_extend + C*row
-            matrix[typ, row, 0, :] = [ins_val, INS, 0]
+    # precompute hompolymers
+    ref_hp_lens = get_hp_lengths(ref)
 
-    for typ in range(typs):
-        for col in range(1, cols):
-            del_val = indel_start if col == 1 else \
-                    matrix[typ, 0, col-1, VALUE] + indel_extend + C*col
-            matrix[typ, 0, col, :] = [del_val, DEL, 0]
+    # convert CIGAR so that each movement is row+1 or col+1, enables easy banding
+    cigar = expand_cigar(cigar)
+    cigar = cigar.replace('X','DI').replace('=','DI') \
+            .replace('M','DI').replace('S','D')
+
+    matrix = np.zeros((typs, b_rows, b_cols, dims))
+    C = 0.05
 
     # calculate matrix
-    for row in range(1, rows):
-        for col in range(1, cols):
-            ref_idx = col - 1
-            query_idx = row - 1
+    cig_idx = -1
+    for b_row in range(b_rows):
+        for b_col in range(b_cols):
+
+            # precompute useful positions
+            a_row, a_col = b_to_a(b_row, b_col, cigar, r)
+            ref_idx = a_col - 1
+            query_idx = a_row - 1
+            b_top = a_to_b(a_row-1, a_col, cigar, r)
+            b_left = a_to_b(a_row, a_col-1, cigar, r)
+            b_diag = a_to_b(a_row-1, a_col-1, cigar, r)
+
+            # skip cells out of range of original "A" matrix
+            if a_row < 0 or a_col < 0 or a_row >= a_rows or a_col >= a_cols:
+                continue
+
+            # very first cell has no score (necessary to skip other elifs)
+            elif a_row == 0 and a_col == 0:
+                continue
+
+            # initialize first row/col of matrix A
+            elif a_row == 0:
+                for typ in range(typs):
+                    del_val = indel_start + indel_extend*(a_col-1) + C * a_col
+                    matrix[typ, b_row, b_col, :] = [del_val, DEL, 0]
+                continue
+            elif a_col == 0:
+                for typ in range(typs):
+                    ins_val = indel_start + indel_extend*(a_row-1) + C * a_row
+                    matrix[typ, b_row, b_col, :] = [ins_val, INS, 0]
+                continue
+
+            # enforce new path remains within r cells of original path
+            elif b_col == 0 or b_col == 2*r:
+                for typ in range(typs):
+                    val = matrix[typ, b_row-1, b_col, VALUE] + 100
+                    matrix[typ, b_row, b_col, :] = [ins_val, SUB, 0]
+                continue
+
 
             # UPDATE INS MATRIX
             # continue INS
-            ins_run = matrix[INS, row-1, col, RUNLEN] + 1
-            ins_val = matrix[INS, row-1, col, VALUE] + indel_extend + C*(row+col)
-            matrix[INS, row, col, :] = [ins_val, INS, ins_run]
+            ins_run = matrix[INS, b_top[0], b_top[1], RUNLEN] + 1
+            ins_val = matrix[INS, b_top[0], b_top[1], VALUE] + \
+                    indel_extend + C * (a_row + a_col)
+            matrix[INS, b_row, b_col, :] = [ins_val, INS, ins_run]
 
             # start INS
             min_val = ins_val
             for typ in [SUB, LHP, SHP]:
-                start_val = matrix[typ, row-1, col, VALUE] + indel_start + C*(row+col)
+                start_val = matrix[typ, b_top[0], b_top[1], VALUE] + \
+                        indel_start + C * (a_row + a_col)
                 if start_val < min_val:
                     min_val = start_val
-                    matrix[INS, row, col, :] = [min_val, typ, 1]
+                    matrix[INS, b_row, b_col, :] = [min_val, typ, 1]
 
 
             # UPDATE DEL MATRIX
             # continue DEL
-            del_run = matrix[DEL, row, col-1, RUNLEN] + 1
-            del_val = matrix[DEL, row, col-1, VALUE] + indel_extend + C*(row+col)
-            matrix[DEL, row, col, :] = [del_val, DEL, del_run]
+            del_run = matrix[DEL, b_left[0], b_left[1], RUNLEN] + 1
+            del_val = matrix[DEL, b_left[0], b_left[1], VALUE] + \
+                    indel_extend + C * (a_row + a_col)
+            matrix[DEL, b_row, b_col, :] = [del_val, DEL, del_run]
 
             # start DEL
             min_val = del_val
             for typ in [SUB, LHP, SHP]:
-                start_val = matrix[typ, row, col-1, VALUE] + indel_start + C*(row+col)
+                start_val = matrix[typ, b_left[0], b_left[1], VALUE] + \
+                        indel_start + C * (a_row + a_col)
                 if start_val < min_val:
                     min_val = start_val
-                    matrix[DEL, row, col, :] = [min_val, typ, 1]
+                    matrix[DEL, b_row, b_col, :] = [min_val, typ, 1]
 
 
             # UPDATE LHP MATRIX
@@ -293,24 +339,27 @@ def align(ref, query, orig_ref, sub_scores, hp_scores, indel_start=5, indel_exte
                     query[query_idx+1] == query[query_idx+2]: # only insert same base
 
                 # continue LHP
-                lhp_run = int(matrix[LHP, row-1, col, RUNLEN] + 1)
-                lhp_val = matrix[LHP, row-lhp_run, col, VALUE] + \
-                        hp_indel_score(ref_hp_lens[ref_idx+1], lhp_run, hp_scores) + C*(row+col)
-                matrix[LHP, row, col, :] = [lhp_val, LHP, lhp_run]
+                lhp_run = int(matrix[LHP, b_top[0], b_top[1], RUNLEN] + 1)
+                lhp_val = matrix[LHP, a_to_b(a_row-lhp_run, a_col, cigar, r)[0], 
+                        a_to_b(a_row-lhp_run, a_col, cigar, r)[1], VALUE] + \
+                        hp_indel_score(ref_hp_lens[ref_idx+1], lhp_run, hp_scores) + \
+                        C * (a_row + a_col)
+                matrix[LHP, b_row, b_col, :] = [lhp_val, LHP, lhp_run]
 
                 # start LHP
                 # if query[query_idx+1] != query[query_idx]:
                 min_val = lhp_val
                 for typ in [SUB, DEL, INS, SHP]:
-                    start_val = matrix[typ, row-1, col, VALUE] + \
-                            hp_indel_score(ref_hp_lens[ref_idx+1], 1, hp_scores) + C*(row+col)
+                    start_val = matrix[typ, b_top[0], b_top[1], VALUE] + \
+                            hp_indel_score(ref_hp_lens[ref_idx+1], 1, hp_scores) + \
+                            C * (a_row + a_col)
                     if start_val < min_val:
                         min_val = start_val
-                        matrix[LHP, row, col, :] = [min_val, typ, 1]
+                        matrix[LHP, b_row, b_col, :] = [min_val, typ, 1]
 
             else: # don't allow insertion of different base
-                lhp_val = max(matrix[:, row-1, col, VALUE]) + 100
-                matrix[LHP, row, col, :] = [lhp_val, SUB, 0]
+                lhp_val = max(matrix[:, b_top[0], b_top[1], VALUE]) + 100
+                matrix[LHP, b_row, b_col, :] = [lhp_val, SUB, 0]
 
 
             # UPDATE SHP MATRIX
@@ -318,56 +367,63 @@ def align(ref, query, orig_ref, sub_scores, hp_scores, indel_start=5, indel_exte
                     ref[ref_idx+1] == ref[ref_idx]: # only delete same base
 
                 # continue SHP
-                shp_run = int(matrix[SHP, row, col-1, RUNLEN] + 1)
-                shp_val = matrix[SHP, row, col-shp_run, VALUE] + \
-                        hp_indel_score(ref_hp_lens[ref_idx], -shp_run, hp_scores) + C*(row+col)
-                matrix[SHP, row, col, :] = [shp_val, SHP, shp_run]
+                shp_run = int(matrix[SHP, b_left[0], b_left[1], RUNLEN] + 1)
+                shp_val = matrix[SHP, a_to_b(a_row, a_col-shp_run, cigar, r)[0], \
+                        a_to_b(a_row, a_col-shp_run, cigar, r)[1], VALUE] + \
+                        hp_indel_score(ref_hp_lens[ref_idx], -shp_run, hp_scores) + \
+                        C * (a_row + a_col)
+                matrix[SHP, b_row, b_col, :] = [shp_val, SHP, shp_run]
 
                 # start SHP
                 # if ref_idx and ref[ref_idx] != ref[ref_idx-1]:
                 min_val = shp_val
                 for typ in [SUB, DEL, INS, LHP]:
-                    start_val = matrix[typ, row, col-1, VALUE] + \
-                        hp_indel_score(ref_hp_lens[ref_idx], -1, hp_scores) + C*(row+col)
+                    start_val = matrix[typ, b_left[0], b_left[1], VALUE] + \
+                        hp_indel_score(ref_hp_lens[ref_idx], -1, hp_scores) + \
+                        C * (a_row + a_col)
                     if start_val < min_val:
                         min_val = start_val
-                        matrix[SHP, row, col, :] = [min_val, typ, 1]
+                        matrix[SHP, b_row, b_col, :] = [min_val, typ, 1]
 
             else: # don't allow deleting different base
-                shp_val = max(matrix[:, row, col-1, VALUE]) + 100
-                matrix[SHP, row, col, :] = [shp_val, SUB, 0]
+                shp_val = max(matrix[:, b_left[0], b_left[1], VALUE]) + 100
+                matrix[SHP, b_row, b_col, :] = [shp_val, SUB, 0]
 
 
             # UPDATE SUB MATRIX
             # simple SUB lookup
-            sub_val = matrix[SUB, row-1, col-1, VALUE] + \
+            sub_val = matrix[SUB, b_diag[0], b_diag[1], VALUE] + \
                     sub_scores[ 
                             base_idx( query[query_idx] ), 
                             base_idx( ref[ref_idx] ) 
                     ]
             if base_idx(query[query_idx]) != base_idx(ref[ref_idx]):
-                sub_val += C*(row+col)
+                sub_val += C * (a_row + a_col)
             min_val = sub_val
-            matrix[SUB, row, col, :] = [min_val, SUB, 0]
+            matrix[SUB, b_row, b_col, :] = [min_val, SUB, 0]
 
             # end INDEL
             for typ in [INS, LHP, DEL, SHP]:
-                end_val = matrix[typ, row, col, VALUE]
+                end_val = matrix[typ, b_row, b_col, VALUE]
                 if end_val < min_val:
                     min_val = end_val
-                    matrix[SUB, row, col, :] = [min_val, typ, 0]
+                    matrix[SUB, b_row, b_col, :] = [min_val, typ, 0]
+
+        cig_idx += 1
 
 
     # initialize backtracking from last cell
     aln = ''
     path = []
-    row, col = rows-1, cols-1
-    old_typ = np.argmin(matrix[:, row, col, VALUE])
+    row, col = a_rows-1, a_cols-1
+    b_pos = a_to_b(row, col, cigar, r)
+    old_typ = np.argmin(matrix[:, b_pos[0], b_pos[1], VALUE])
 
     # backtrack
     while row > 0 or col > 0:
         path.append((int(old_typ), row, col))
-        val, new_typ, runlen = matrix[int(old_typ), row, col, :]
+        b_pos = a_to_b(row, col, cigar, r)
+        val, new_typ, runlen = matrix[int(old_typ), b_pos[0], b_pos[1], :]
         op = ''
         if new_typ == LHP or new_typ == INS:   # each move is an insertion
             op = 'I'
@@ -381,30 +437,10 @@ def align(ref, query, orig_ref, sub_scores, hp_scores, indel_start=5, indel_exte
                 col -= 1
                 op = '=' if orig_ref[col] == query[row] else 'X'
         else:
-            print("ERROR: unknown alignment matrix type '" + str(typ) + "'.")
+            print("ERROR: unknown alignment matrix type:", new_typ)
+            break
         aln += op
         old_typ = new_typ
-
-    # debug print matrices
-    if verbose:
-        types = ['SUB', 'INS', 'LHP', 'DEL', 'SHP']
-        ops = 'MILDS'
-        for typ, name in enumerate(types):
-            print('\n\n', name)
-            print('  -    ')
-            print('    '.join(ref))
-            print('\n')
-            for row in range(rows):
-                if row == 0:
-                    print('-')
-                else:
-                    print(query[row-1])
-
-                for col in range(cols):
-                    print(" " + str(int(matrix[typ, row, col, RUNLEN])) + \
-                            ops[int(matrix[typ, row, col, TYPE])] + \
-                            '$' if (typ, row, col) in path else ' ')
-                print('\n')
 
     # we backtracked, so get forward alignment
     return aln[::-1]

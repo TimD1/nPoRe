@@ -9,7 +9,53 @@ import pysam
 from numba import njit
 
 import cfg
-from aln import dump
+
+
+def collapse_cigar(extended_cigar):
+    ''' 
+    Converts extended CIGAR ops list to normal CIGAR string. 
+    'DMMMII' -> '1D3M2I'
+    '''
+    count = 1
+    last = None
+    groups = []
+    for op in extended_cigar:
+        if last and op == last:
+            count += 1
+        elif last:
+            groups.append((count, last))
+            count = 1
+        last = op
+
+    if last:
+        groups.append((count, last))
+
+    out = ''
+    for num, op in groups:
+        out += '%s%s' % (num, op)
+    return out
+
+
+
+@njit()
+def expand_cigar(cigar):
+    ''' 
+    Converts CIGAR string to list of ops. 
+    '1D3M2I' -> 'DMMMII'
+    '''
+
+    cigar_str = ''
+    count = 0
+
+    for char in cigar:
+        if char in '0123456789':
+            count = count * 10 + ord(char) - ord('0')
+        else:
+            cigar_str += count * char
+            count = 0
+    return cigar_str
+
+
 
 class Cigar():
     ''' Enum for pysam's cigartuples encoding.  '''
@@ -243,34 +289,14 @@ def standardize_cigar(cigar, ref, seq):
 
     cigar0 = subs_to_indels(cigar)
 
-    seq_lens = [len(seq), seq_len(cigar), seq_len(cigar0)]
-    ref_lens = [len(ref), ref_len(cigar), ref_len(cigar0)]
-    if not all([l == ref_lens[0] for l in ref_lens]) or \
-            not all([l == seq_lens[0] for l in seq_lens]):
-        print("\nSUB ERROR")
-        dump(ref, seq, cigar)
-        dump(ref, seq, cigar0)
-
     diff = True
     while diff: # loop until CIGAR is stable
 
         cigar1, diff1 = push_dels_left(cigar0, ref)
-        if ref_len(cigar1) != len(ref) or seq_len(cigar1) != len(seq):
-            print("\nDEL ERROR")
-            dump(ref, seq, cigar0)
-            dump(ref, seq, cigar1)
 
         cigar2, diff2 = push_inss_left(cigar1, seq)
-        if ref_len(cigar2) != len(ref) or seq_len(cigar2) != len(seq):
-            print("\nINS ERROR")
-            dump(ref, seq, cigar1)
-            dump(ref, seq, cigar2)
 
         cigar3, diff3 = push_inss_thru_dels(cigar2)
-        if ref_len(cigar3) != len(ref) or seq_len(cigar3) != len(seq):
-            print("\nSWAP ERROR")
-            dump(ref, seq, cigar2)
-            dump(ref, seq, cigar3)
 
         diff = diff1 or diff2 or diff3
         cigar0 = cigar3
