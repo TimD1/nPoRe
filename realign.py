@@ -20,8 +20,10 @@ def argparser():
     # mandatory args
     parser.add_argument("bam")
     parser.add_argument("ref")
-    parser.add_argument("vcf")
     parser.add_argument("out")
+
+    # vcf only necessary if applying SUBs
+    parser.add_argument("--vcf")
 
     # region of interest
     parser.add_argument("--contig", type=str, default="")

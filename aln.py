@@ -226,14 +226,14 @@ def b_to_a(b_row, b_col, cigar, r):
 
 
 @njit()
-def align(ref, query, orig_ref, cigar, sub_scores, hp_scores, 
-        indel_start=5, indel_extend=2, r = 5, verbose=False):
+def align(ref, seq, orig_ref, cigar, sub_scores, hp_scores, 
+        indel_start=5, indel_extend=2, r = 3, C = 0.05, verbose=False):
     ''' Perform alignment. '''
 
     # set helpful constants
-    a_rows = len(query) + 1
+    a_rows = len(seq) + 1
     a_cols = len(ref) + 1
-    b_rows = len(query) + len(ref) + 1
+    b_rows = len(seq) + len(ref) + 1
     b_cols = 2*r + 1
 
     dims = 3
@@ -254,20 +254,17 @@ def align(ref, query, orig_ref, cigar, sub_scores, hp_scores,
     # convert CIGAR so that each movement is row+1 or col+1, enables easy banding
     cigar = expand_cigar(cigar)
     cigar = cigar.replace('X','DI').replace('=','DI') \
-            .replace('M','DI').replace('S','D')
+            .replace('M','DI').replace('S','I')
 
     matrix = np.zeros((typs, b_rows, b_cols, dims))
-    C = 0.05
-
     # calculate matrix
-    cig_idx = -1
     for b_row in range(b_rows):
         for b_col in range(b_cols):
 
             # precompute useful positions
             a_row, a_col = b_to_a(b_row, b_col, cigar, r)
             ref_idx = a_col - 1
-            query_idx = a_row - 1
+            seq_idx = a_row - 1
             b_top = a_to_b(a_row-1, a_col, cigar, r)
             b_left = a_to_b(a_row, a_col-1, cigar, r)
             b_diag = a_to_b(a_row-1, a_col-1, cigar, r)
@@ -284,19 +281,23 @@ def align(ref, query, orig_ref, cigar, sub_scores, hp_scores,
             elif a_row == 0:
                 for typ in range(typs):
                     del_val = indel_start + indel_extend*(a_col-1) + C * a_col
-                    matrix[typ, b_row, b_col, :] = [del_val, DEL, 0]
+                    matrix[typ, b_row, b_col, :] = [del_val, DEL, a_col]
                 continue
             elif a_col == 0:
                 for typ in range(typs):
                     ins_val = indel_start + indel_extend*(a_row-1) + C * a_row
-                    matrix[typ, b_row, b_col, :] = [ins_val, INS, 0]
+                    matrix[typ, b_row, b_col, :] = [ins_val, INS, a_row]
                 continue
+
+            # shouldn't be possible
+            elif b_row == 0:
+                print("ERROR: b_row == 0")
 
             # enforce new path remains within r cells of original path
             elif b_col == 0 or b_col == 2*r:
+                val = max(matrix[:, b_row-1, b_col, VALUE]) + 100
                 for typ in range(typs):
-                    val = matrix[typ, b_row-1, b_col, VALUE] + 100
-                    matrix[typ, b_row, b_col, :] = [ins_val, SUB, 0]
+                    matrix[typ, b_row, b_col, :] = [val, SUB, 0]
                 continue
 
 
@@ -335,8 +336,8 @@ def align(ref, query, orig_ref, cigar, sub_scores, hp_scores,
 
 
             # UPDATE LHP MATRIX
-            if query_idx+2 < len(query) and ref_idx+1 < len(ref) and \
-                    query[query_idx+1] == query[query_idx+2]: # only insert same base
+            if seq_idx+2 < len(seq) and ref_idx+1 < len(ref) and \
+                    seq[seq_idx+1] == seq[seq_idx+2]: # only insert same base
 
                 # continue LHP
                 lhp_run = int(matrix[LHP, b_top[0], b_top[1], RUNLEN] + 1)
@@ -347,7 +348,7 @@ def align(ref, query, orig_ref, cigar, sub_scores, hp_scores,
                 matrix[LHP, b_row, b_col, :] = [lhp_val, LHP, lhp_run]
 
                 # start LHP
-                # if query[query_idx+1] != query[query_idx]:
+                # if seq[seq_idx+1] != seq[seq_idx]:
                 min_val = lhp_val
                 for typ in [SUB, DEL, INS, SHP]:
                     start_val = matrix[typ, b_top[0], b_top[1], VALUE] + \
@@ -394,10 +395,10 @@ def align(ref, query, orig_ref, cigar, sub_scores, hp_scores,
             # simple SUB lookup
             sub_val = matrix[SUB, b_diag[0], b_diag[1], VALUE] + \
                     sub_scores[ 
-                            base_idx( query[query_idx] ), 
+                            base_idx( seq[seq_idx] ), 
                             base_idx( ref[ref_idx] ) 
                     ]
-            if base_idx(query[query_idx]) != base_idx(ref[ref_idx]):
+            if base_idx(seq[seq_idx]) != base_idx(ref[ref_idx]):
                 sub_val += C * (a_row + a_col)
             min_val = sub_val
             matrix[SUB, b_row, b_col, :] = [min_val, SUB, 0]
@@ -408,8 +409,6 @@ def align(ref, query, orig_ref, cigar, sub_scores, hp_scores,
                 if end_val < min_val:
                     min_val = end_val
                     matrix[SUB, b_row, b_col, :] = [min_val, typ, 0]
-
-        cig_idx += 1
 
 
     # initialize backtracking from last cell
@@ -435,12 +434,92 @@ def align(ref, query, orig_ref, cigar, sub_scores, hp_scores,
             if old_typ == SUB:
                 row -= 1
                 col -= 1
-                op = '=' if orig_ref[col] == query[row] else 'X'
+                op = '=' if orig_ref[col] == seq[row] else 'X'
         else:
             print("ERROR: unknown alignment matrix type:", new_typ)
             break
         aln += op
         old_typ = new_typ
+
+    # debug print matrices
+    if verbose:
+        types = ['SUB', 'INS', 'LHP', 'DEL', 'SHP']
+        ops = 'MILDS'
+
+        # PRINT A
+        for typ, name in enumerate(types):
+            print('\nA:', name)
+            s = '    -'
+            for base in ref:
+                s += '    ' + base
+            print(s)
+
+            for row in range(a_rows):
+
+                if row == 0:
+                    s = '-'
+                else:
+                    s = seq[row-1]
+
+                for col in range(a_cols):
+                    b_pos = a_to_b(row, col, cigar, r)
+                    op = ops[int(matrix[typ, b_pos[0], b_pos[1], TYPE])]
+                    if (typ, row, col) in path:
+                        mark = '$'
+                    elif col == 0 or row == 0:
+                        mark = '*'
+                    elif b_pos[1] == 0 or b_pos[1] == 2*r:
+                        mark = '.'
+                    else:
+                        mark = ' '
+                    runlen = int(matrix[typ, b_pos[0], b_pos[1], RUNLEN])
+                    if runlen < 10:
+                        s += "  " + str(runlen) + op + mark
+                    else:
+                        s += " " + str(runlen) + op + mark
+                print(s)
+
+        # PRINT B
+            print('\nB:', name)
+
+            # print columns
+            s = ' '
+            for col in range(b_cols):
+                if col < 10:
+                    s = s + '    ' + str(col)
+                else:
+                    s = s + '   ' + str(col)
+            print(s)
+
+            for row in range(b_rows):
+
+                # align labels
+                if row < 10:
+                    s = str(row) + ' '
+                else:
+                    s = str(row)
+
+                for col in range(b_cols):
+                    a_row, a_col = b_to_a(row, col, cigar, r)
+                    op = ops[int(matrix[typ, row, col, TYPE])]
+                    if (typ, row, col) in path:
+                        mark = '$'
+                    elif a_row < 0 or a_col < 0 or a_row >= a_rows or a_col >= a_cols:
+                        mark = '~'
+                    elif a_col == 0 or a_row == 0:
+                        mark = '*'
+                    elif col == 0 or col == 2*r:
+                        mark = '.'
+                    else:
+                        mark = ' '
+                    runlen = int(matrix[typ, row, col, RUNLEN])
+                    if runlen < 10:
+                        s += "  " + str(runlen) + op + mark
+                    else:
+                        s += " " + str(runlen) + op + mark
+                print(s)
+            print(' ')
+
 
     # we backtracked, so get forward alignment
     return aln[::-1]
