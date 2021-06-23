@@ -303,7 +303,6 @@ def write_results(alignments, outfile):
                 exit(1)
 
             # overwrite CIGAR string
-            print('\t', read_id, len(old_alignment.query_alignment_sequence), len(old_alignment.query_alignment_qualities), seq_len(expand_cigar(cigar)), len(seq))
             new_alignment = pysam.AlignedSegment()
             new_alignment.query_name      = old_alignment.query_name
             new_alignment.query_sequence  = old_alignment.query_alignment_sequence

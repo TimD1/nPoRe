@@ -18,7 +18,12 @@ def main():
     ref_rd_cigs = []
     # ref_rd_cigs.append(("ACCAGGCAT", "ACCAGGCAT", "9="))
     # ref_rd_cigs.append(("ACCAGGCAT", "ACAGGCA", "2=1D5=1D"))
-    ref_rd_cigs.append(("ACCAGGCAT", "ACCCAGGAT", "1=1I5=1D2="))
+    # ref_rd_cigs.append(("ACCAGGCAT", "ACCCAGGAT", "1=1I5=1D2="))
+    ref_rd_cigs.append((
+        "AAGATGGCCACACCAATATATCCCATTCTGCATGTTC",
+        "AAGATGGCCACACCAACCTGTCCCATTCTGCATGTTC",
+        "16=2X1=1X17="
+        ))
 
     # load existing score mats
     subs, hps = get_confusion_matrices()

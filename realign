@@ -13,7 +13,7 @@ python3 realign.py \
     --vcf $VCF \
     --contig chr19 \
     --contig_beg 40000000 \
-    --contig_end 40010000 \
+    --contig_end 41000000 \
     realigned.bam
 
 # update MD tags
