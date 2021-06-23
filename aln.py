@@ -255,7 +255,7 @@ def align(ref, seq, orig_ref, cigar, sub_scores, hp_scores,
     RUNLEN = 2
 
     typs = 5# types
-    SUB = 0 # substitution
+    MAT = 0 # substitution
     INS = 1 # insertion
     LHP = 2 # lengthen homopolymer
     DEL = 3 # deletion
@@ -311,7 +311,7 @@ def align(ref, seq, orig_ref, cigar, sub_scores, hp_scores,
             elif b_col == 0 or b_col == 2*r:
                 val = max(matrix[:, b_row-1, b_col, VALUE]) + 100
                 for typ in range(typs):
-                    matrix[typ, b_row, b_col, :] = [val, SUB, 0]
+                    matrix[typ, b_row, b_col, :] = [val, MAT, 0]
                 continue
 
 
@@ -325,7 +325,7 @@ def align(ref, seq, orig_ref, cigar, sub_scores, hp_scores,
             matrix[INS, b_row, b_col, :] = [ins_val, INS, ins_run]
 
             # start INS
-            start_val = matrix[SUB, b_top[0], b_top[1], VALUE] + indel_start
+            start_val = matrix[MAT, b_top[0], b_top[1], VALUE] + indel_start
             if start_val < ins_val:
                 matrix[INS, b_row, b_col, :] = [start_val, INS, 1]
 
@@ -340,7 +340,7 @@ def align(ref, seq, orig_ref, cigar, sub_scores, hp_scores,
             matrix[DEL, b_row, b_col, :] = [del_val, DEL, del_run]
 
             # start DEL
-            start_val = matrix[SUB, b_left[0], b_left[1], VALUE] + indel_start
+            start_val = matrix[MAT, b_left[0], b_left[1], VALUE] + indel_start
             if start_val < del_val:
                 matrix[DEL, b_row, b_col, :] = [start_val, DEL, 1]
 
@@ -361,13 +361,13 @@ def align(ref, seq, orig_ref, cigar, sub_scores, hp_scores,
 
                 # start LHP
                 if seq[seq_idx+1] != seq[seq_idx]:
-                    start_val = matrix[SUB, b_top[0], b_top[1], VALUE] + \
+                    start_val = matrix[MAT, b_top[0], b_top[1], VALUE] + \
                             hp_indel_score(ref_hp_lens[ref_idx+1], 1, hp_scores)
                     if start_val < lhp_val:
                         matrix[LHP, b_row, b_col, :] = [start_val, LHP, 1]
 
             else: # don't allow insertion of different base
-                lhp_val = matrix[SUB, b_diag[0], b_diag[1], VALUE] + 100
+                lhp_val = matrix[MAT, b_diag[0], b_diag[1], VALUE] + 100
                 matrix[LHP, b_row, b_col, :] = [lhp_val, LHP, 0]
 
 
@@ -387,28 +387,28 @@ def align(ref, seq, orig_ref, cigar, sub_scores, hp_scores,
 
                 # start SHP
                 if ref_idx and ref[ref_idx] != ref[ref_idx-1]:
-                    start_val = matrix[SUB, b_left[0], b_left[1], VALUE] + \
+                    start_val = matrix[MAT, b_left[0], b_left[1], VALUE] + \
                         hp_indel_score(ref_hp_lens[ref_idx], -1, hp_scores)
                     if start_val < shp_val:
                         matrix[SHP, b_row, b_col, :] = [start_val, SHP, 1]
 
             else: # don't allow deleting different base
-                shp_val = matrix[SUB, b_diag[0], b_diag[1], VALUE] + 100
+                shp_val = matrix[MAT, b_diag[0], b_diag[1], VALUE] + 100
                 matrix[SHP, b_row, b_col, :] = [shp_val, SHP, 0]
 
 
-            # UPDATE SUB MATRIX
-            if matrix[SUB, b_diag[0], b_diag[1], TYPE] == SUB:
-                runlen = matrix[SUB, b_diag[0], b_diag[1], RUNLEN] + 1
+            # UPDATE MAT MATRIX
+            if matrix[MAT, b_diag[0], b_diag[1], TYPE] == MAT:
+                runlen = matrix[MAT, b_diag[0], b_diag[1], RUNLEN] + 1
             else:
                 runlen = 1
-            sub_val = matrix[SUB, b_diag[0], b_diag[1], VALUE] + \
+            sub_val = matrix[MAT, b_diag[0], b_diag[1], VALUE] + \
                     sub_scores[ 
                             base_idx( seq[seq_idx] ), 
                             base_idx( ref[ref_idx] ) 
                     ]
             min_val = sub_val
-            matrix[SUB, b_row, b_col, :] = [min_val, SUB, runlen]
+            matrix[MAT, b_row, b_col, :] = [min_val, MAT, runlen]
 
             # end INDEL
             for typ in [INS, LHP, DEL, SHP]:
@@ -416,7 +416,7 @@ def align(ref, seq, orig_ref, cigar, sub_scores, hp_scores,
                 if end_val < min_val:
                     min_val = end_val
                     runlen = matrix[typ, b_row, b_col, RUNLEN]
-                    matrix[SUB, b_row, b_col, :] = [min_val, typ, runlen]
+                    matrix[MAT, b_row, b_col, :] = [min_val, typ, runlen]
 
 
     # initialize backtracking from last cell
@@ -424,35 +424,24 @@ def align(ref, seq, orig_ref, cigar, sub_scores, hp_scores,
     path = []
     row, col = a_rows-1, a_cols-1
     b_pos = a_to_b(row, col, inss, dels, r)
-    typ = matrix[SUB, b_pos[0], b_pos[1], VALUE]
+    typ = matrix[MAT, b_pos[0], b_pos[1], VALUE]
 
     # backtrack
     while row > 0 or col > 0:
         if row < 0:
             print("\nERROR: row < 0 @  A: (", row, ",", col, "), B: (", b_pos[0], ",", b_pos[1], ").")
-            print(matrix[SUB,:10,:,VALUE])
-            print(matrix[SUB,:10,:,TYPE])
-            print(matrix[SUB,:10,:,RUNLEN])
             break
         if col < 0:
             print("\nERROR: col < 0 @  A: (", row, ",", col, "), B: (", b_pos[0], ",", b_pos[1], ").")
-            print(matrix[SUB,:10,:,VALUE])
-            print(matrix[SUB,:10,:,TYPE])
-            print(matrix[SUB,:10,:,RUNLEN])
             break
-        path.append((SUB, row, col))
+        path.append((MAT, row, col))
         b_pos = a_to_b(row, col, inss, dels, r)
-        val, typ, runlen = matrix[SUB, b_pos[0], b_pos[1], :]
+        val, typ, runlen = matrix[MAT, b_pos[0], b_pos[1], :]
         # Invalid SHPs and LHPs are runlen 0. They should never be reached during 
         # backtracking (due to high penalties), but leaving this here just-in-case
         runlen = max(1, int(runlen))
         if runlen == 0:
             print("\nERROR: RUNLEN == 0 @  A: (", row, ",", col, "), B: (", b_pos[0], ",", b_pos[1], ").")
-            print("REF:", orig_ref[col-20:col], orig_ref[col], orig_ref[col+1:col+20])
-            print("SEQ:", seq[row-20:row], seq[row], seq[row+1:row+20])
-            print(matrix[SUB,b_pos[0]-5:b_pos[0]+5,:,VALUE])
-            print(matrix[SUB,b_pos[0]-5:b_pos[0]+5,:,TYPE])
-            print(matrix[SUB,b_pos[0]-5:b_pos[0]+5,:,RUNLEN])
             break
         op = ''
         if typ == LHP or typ == INS:   # each move is an insertion
@@ -463,7 +452,7 @@ def align(ref, seq, orig_ref, cigar, sub_scores, hp_scores,
             for i in range(runlen):
                 op += 'D'
             col -= runlen
-        elif typ == SUB: # only sub if stay in same matrix
+        elif typ == MAT: # only sub if stay in same matrix
             i = 0
             while i < runlen:
                 row -= 1
@@ -477,7 +466,7 @@ def align(ref, seq, orig_ref, cigar, sub_scores, hp_scores,
 
     # debug print matrices
     if verbose:
-        types = ['SUB', 'INS', 'LHP', 'DEL', 'SHP']
+        types = ['MAT', 'INS', 'LHP', 'DEL', 'SHP']
         ops = 'MILDS'
 
         # PRINT A
