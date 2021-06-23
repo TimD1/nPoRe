@@ -317,7 +317,10 @@ def align(ref, seq, orig_ref, cigar, sub_scores, hp_scores,
 
             # UPDATE INS MATRIX
             # continue INS
-            ins_run = matrix[INS, b_top[0], b_top[1], RUNLEN] + 1
+            if a_row == 1:
+                ins_run = 1
+            else:
+                ins_run = matrix[INS, b_top[0], b_top[1], RUNLEN] + 1
             ins_val = matrix[INS, b_top[0], b_top[1], VALUE] + indel_extend
             matrix[INS, b_row, b_col, :] = [ins_val, INS, ins_run]
 
@@ -329,7 +332,10 @@ def align(ref, seq, orig_ref, cigar, sub_scores, hp_scores,
 
             # UPDATE DEL MATRIX
             # continue DEL
-            del_run = matrix[DEL, b_left[0], b_left[1], RUNLEN] + 1
+            if a_col == 1:
+                del_run = 1
+            else:
+                del_run = matrix[DEL, b_left[0], b_left[1], RUNLEN] + 1
             del_val = matrix[DEL, b_left[0], b_left[1], VALUE] + indel_extend
             matrix[DEL, b_row, b_col, :] = [del_val, DEL, del_run]
 
@@ -344,7 +350,10 @@ def align(ref, seq, orig_ref, cigar, sub_scores, hp_scores,
                     seq[seq_idx+1] == seq[seq_idx+2]: # only insert same base
 
                 # continue LHP
-                lhp_run = int(matrix[LHP, b_top[0], b_top[1], RUNLEN] + 1)
+                if a_row == 1:
+                    lhp_run = 1
+                else:
+                    lhp_run = int(matrix[LHP, b_top[0], b_top[1], RUNLEN] + 1)
                 lhp_val = matrix[LHP, a_to_b(a_row-lhp_run, a_col, inss, dels, r)[0], 
                         a_to_b(a_row-lhp_run, a_col, inss, dels, r)[1], VALUE] + \
                         hp_indel_score(ref_hp_lens[ref_idx+1], lhp_run, hp_scores)
@@ -367,7 +376,10 @@ def align(ref, seq, orig_ref, cigar, sub_scores, hp_scores,
                     ref[ref_idx+1] == ref[ref_idx]: # only delete same base
 
                 # continue SHP
-                shp_run = int(matrix[SHP, b_left[0], b_left[1], RUNLEN] + 1)
+                if a_col == 1:
+                    shp_run = 1
+                else:
+                    shp_run = int(matrix[SHP, b_left[0], b_left[1], RUNLEN] + 1)
                 shp_val = matrix[SHP, a_to_b(a_row, a_col-shp_run, inss, dels, r)[0], \
                         a_to_b(a_row, a_col-shp_run, inss, dels, r)[1], VALUE] + \
                         hp_indel_score(ref_hp_lens[ref_idx], -shp_run, hp_scores)
@@ -417,10 +429,16 @@ def align(ref, seq, orig_ref, cigar, sub_scores, hp_scores,
     # backtrack
     while row > 0 or col > 0:
         if row < 0:
-            print("ERROR: while backtracking, row < 0.")
+            print("\nERROR: row < 0 @  A: (", row, ",", col, "), B: (", b_pos[0], ",", b_pos[1], ").")
+            print(matrix[SUB,:10,:,VALUE])
+            print(matrix[SUB,:10,:,TYPE])
+            print(matrix[SUB,:10,:,RUNLEN])
             break
         if col < 0:
-            print("ERROR: while backtracking, col < 0.")
+            print("\nERROR: col < 0 @  A: (", row, ",", col, "), B: (", b_pos[0], ",", b_pos[1], ").")
+            print(matrix[SUB,:10,:,VALUE])
+            print(matrix[SUB,:10,:,TYPE])
+            print(matrix[SUB,:10,:,RUNLEN])
             break
         path.append((SUB, row, col))
         b_pos = a_to_b(row, col, inss, dels, r)
@@ -428,11 +446,14 @@ def align(ref, seq, orig_ref, cigar, sub_scores, hp_scores,
         # Invalid SHPs and LHPs are runlen 0. They should never be reached during 
         # backtracking (due to high penalties), but leaving this here just-in-case
         runlen = max(1, int(runlen))
-        # if runlen == 0:
-        #     print("\nERROR: RUNLEN == 0 @", typ, " A: (", row, ",", col, "), B: (", b_pos[0], ",", b_pos[1], ").")
-        #     print("REF:", orig_ref[col-20:col], orig_ref[col], orig_ref[col+1:col+20])
-        #     print("SEQ:", seq[row-20:row], seq[row], seq[row+1:row+20])
-        #     break
+        if runlen == 0:
+            print("\nERROR: RUNLEN == 0 @  A: (", row, ",", col, "), B: (", b_pos[0], ",", b_pos[1], ").")
+            print("REF:", orig_ref[col-20:col], orig_ref[col], orig_ref[col+1:col+20])
+            print("SEQ:", seq[row-20:row], seq[row], seq[row+1:row+20])
+            print(matrix[SUB,b_pos[0]-5:b_pos[0]+5,:,VALUE])
+            print(matrix[SUB,b_pos[0]-5:b_pos[0]+5,:,TYPE])
+            print(matrix[SUB,b_pos[0]-5:b_pos[0]+5,:,RUNLEN])
+            break
         op = ''
         if typ == LHP or typ == INS:   # each move is an insertion
             for i in range(runlen):

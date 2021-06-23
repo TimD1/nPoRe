@@ -17,4 +17,4 @@ python3 realign.py \
     realigned.bam
 
 # update MD tags
-~/NanoporeScripts/align ./realigned.bam $REF
+# ~/NanoporeScripts/align ./realigned.bam $REF

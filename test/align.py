@@ -19,11 +19,10 @@ def main():
     # ref_rd_cigs.append(("ACCAGGCAT", "ACCAGGCAT", "9="))
     # ref_rd_cigs.append(("ACCAGGCAT", "ACAGGCA", "2=1D5=1D"))
     # ref_rd_cigs.append(("ACCAGGCAT", "ACCCAGGAT", "1=1I5=1D2="))
-    ref_rd_cigs.append((
-        "AAGATGGCCACACCAATATATCCCATTCTGCATGTTC",
-        "AAGATGGCCACACCAACCTGTCCCATTCTGCATGTTC",
-        "16=2X1=1X17="
-        ))
+    ref_rd_cigs.append(("AAAACCAGGCA", "AAACCAGGCA", "1D10="))
+    ref_rd_cigs.append(("TAAACCAGGCA", "AAACCAGGCA", "1D10="))
+    ref_rd_cigs.append(("AAAACCAGGCA", "AAAAACCAGGCA", "1I11="))
+    ref_rd_cigs.append(("AAAACCAGGCA", "TAAAACCAGGCA", "1I11="))
 
     # load existing score mats
     subs, hps = get_confusion_matrices()
@@ -32,7 +31,7 @@ def main():
     # test alignment algorithm
     print('\n> aligning...')
     for ref, read, cigar in ref_rd_cigs:
-        new_cigar = align(ref, read, ref, cigar, sub_scores, hp_scores, verbose=True)
+        new_cigar = align(ref, read, ref, cigar, sub_scores, hp_scores, r=4, verbose=True)
         print(f"Cigar: {expand_cigar(cigar)}")
         dump(ref, read, new_cigar)
 
