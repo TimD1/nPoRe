@@ -234,8 +234,13 @@ def b_to_a(b_row, b_col, inss, dels, r):
 
 @njit()
 def align(ref, seq, orig_ref, cigar, sub_scores, hp_scores, 
-        indel_start=5, indel_extend=2, r = 40, verbose=False):
-    ''' Perform alignment. '''
+        indel_start=5, indel_extend=2, r = 40, verbosity=0):
+    ''' Perform alignment. 
+    verbosity:
+     0 -> no printing
+     1 -> print final matrix
+     2 -> print each cell (with pointers and scores)
+    '''
 
     # convert CIGAR so that each movement is row+1 or col+1, enables easy banding
     cigar = expand_cigar(cigar)
@@ -360,11 +365,10 @@ def align(ref, seq, orig_ref, cigar, sub_scores, hp_scores,
                 matrix[LHP, b_row, b_col, :] = [lhp_val, LHP, lhp_run]
 
                 # start LHP
-                if seq[seq_idx+1] != seq[seq_idx]:
-                    start_val = matrix[MAT, b_top[0], b_top[1], VALUE] + \
-                            hp_indel_score(ref_hp_lens[ref_idx+1], 1, hp_scores)
-                    if start_val < lhp_val:
-                        matrix[LHP, b_row, b_col, :] = [start_val, LHP, 1]
+                start_val = matrix[MAT, b_top[0], b_top[1], VALUE] + \
+                        hp_indel_score(ref_hp_lens[ref_idx+1], 1, hp_scores)
+                if start_val < lhp_val:
+                    matrix[LHP, b_row, b_col, :] = [start_val, LHP, 1]
 
             else: # don't allow insertion of different base
                 lhp_val = matrix[MAT, b_diag[0], b_diag[1], VALUE] + 100
@@ -386,11 +390,10 @@ def align(ref, seq, orig_ref, cigar, sub_scores, hp_scores,
                 matrix[SHP, b_row, b_col, :] = [shp_val, SHP, shp_run]
 
                 # start SHP
-                if ref_idx and ref[ref_idx] != ref[ref_idx-1]:
-                    start_val = matrix[MAT, b_left[0], b_left[1], VALUE] + \
-                        hp_indel_score(ref_hp_lens[ref_idx], -1, hp_scores)
-                    if start_val < shp_val:
-                        matrix[SHP, b_row, b_col, :] = [start_val, SHP, 1]
+                start_val = matrix[MAT, b_left[0], b_left[1], VALUE] + \
+                    hp_indel_score(ref_hp_lens[ref_idx], -1, hp_scores)
+                if start_val < shp_val:
+                    matrix[SHP, b_row, b_col, :] = [start_val, SHP, 1]
 
             else: # don't allow deleting different base
                 shp_val = matrix[MAT, b_diag[0], b_diag[1], VALUE] + 100
@@ -411,12 +414,33 @@ def align(ref, seq, orig_ref, cigar, sub_scores, hp_scores,
             matrix[MAT, b_row, b_col, :] = [min_val, MAT, runlen]
 
             # end INDEL
+            if verbosity >= 2:
+                print("REF:", ref)
+                s = "     "
+                for x in range(ref_idx):
+                    s += " "
+                s += "^"
+                print(s)
+
+                print("SEQ:", seq)
+                s = "     "
+                for x in range(seq_idx):
+                    s += " "
+                s += "^"
+                print(s)
+                print("M", sub_val)
+            chars = "MILDS"
             for typ in [INS, LHP, DEL, SHP]:
+
                 end_val = matrix[typ, b_row, b_col, VALUE]
+                if verbosity >= 2:
+                    print(chars[typ], end_val)
                 if end_val < min_val:
                     min_val = end_val
                     runlen = matrix[typ, b_row, b_col, RUNLEN]
                     matrix[MAT, b_row, b_col, :] = [min_val, typ, runlen]
+            if verbosity >= 2:
+                print("\n")
 
 
     # initialize backtracking from last cell
@@ -465,7 +489,7 @@ def align(ref, seq, orig_ref, cigar, sub_scores, hp_scores,
         aln += op
 
     # debug print matrices
-    if verbose:
+    if verbosity >= 1:
         types = ['MAT', 'INS', 'LHP', 'DEL', 'SHP']
         ops = 'MILDS'
 

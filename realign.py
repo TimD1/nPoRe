@@ -57,7 +57,6 @@ def main():
     if cfg.args.plot:
         print("\n> plotting confusion matrices")
         plot_confusion_matrices(subs, hps)
-
         print("\n> plotting distributions")
         plot_hp_len_dists(hps)
 

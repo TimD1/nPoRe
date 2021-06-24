@@ -32,11 +32,11 @@ def realign_bam():
     with mp.Pool() as pool:
         read_data = pool.map(realign_read, read_data)
 
-    # standardize 'cigar' format, replace subs with indels
+    # standardize CIGAR format, replace subs with indels
     if cfg.args.indels_only:
         print('    > converting to standard INDEL format')
-        # with mp.Pool() as pool:
-        #     read_data = pool.map(standardize_indels, read_data)
+        with mp.Pool() as pool:
+            read_data = pool.map(standardize_cigar, read_data)
 
     return read_data
    
@@ -89,13 +89,12 @@ def realign_read(read_data):
 
     read_id, ref_name, start, cigar, ref, seq = read_data
     new_cigar = align(ref, seq, ref, cigar, cfg.args.sub_scores, cfg.args.hp_scores)
-    final_cigar = collapse_cigar(new_cigar)
 
     with cfg.read_count.get_lock():
         cfg.read_count.value += 1
         print(f"\r        {cfg.read_count.value} reads realigned.", end='', flush=True)
 
-    return (read_id, ref_name, start, final_cigar, ref, seq)
+    return (read_id, ref_name, start, new_cigar, ref, seq)
 
 
     

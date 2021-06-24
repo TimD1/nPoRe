@@ -286,8 +286,10 @@ def ref_len(cigar):
 
 
 
-def standardize_cigar(cigar, ref, seq):
+def standardize_cigar(read_data):
     ''' Try to force all INDELs into beginning of repetitive region. '''
+
+    read_id, ref_name, start, cigar, ref, seq = read_data
 
     cigar0 = subs_to_indels(cigar)
 
@@ -303,5 +305,7 @@ def standardize_cigar(cigar, ref, seq):
         diff = diff1 or diff2 or diff3
         cigar0 = cigar3
 
-    return cigar0
+    final_cigar = collapse_cigar(cigar0)
+
+    return (read_id, ref_name, start, final_cigar, ref, seq)
 
