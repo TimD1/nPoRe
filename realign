@@ -14,8 +14,9 @@ python3 realign.py \
     --contig chr19 \
     --contig_beg 40000000 \
     --contig_end 41000000 \
+    --splice_subs \
     --indels_only \
     realigned.bam
 
 # update MD tags
-~/NanoporeScripts/align ./realigned.bam $REF
+# ~/NanoporeScripts/align ./realigned.bam $REF

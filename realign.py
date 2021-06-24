@@ -24,6 +24,7 @@ def argparser():
 
     # vcf only necessary if applying SUBs
     parser.add_argument("--vcf")
+    parser.add_argument("--min_snp_qual", type=int, default=0)
 
     # region of interest
     parser.add_argument("--contig", type=str, default="")
@@ -31,7 +32,6 @@ def argparser():
     parser.add_argument("--contig_end", type=int, default=55000000)
 
     # algorithm parameters
-    parser.add_argument("--min_qual", type=int, default=0)
     parser.add_argument("--max_hp", type=int, default=100)
     parser.add_argument("--window", type=int, default=25)
     parser.add_argument("--chunk_width", type=int, default=10000)

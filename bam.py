@@ -10,6 +10,7 @@ import pysam
 import cfg
 from aln import *
 from cig import *
+from vcf import *
 
 def realign_bam():
     '''
@@ -22,9 +23,11 @@ def realign_bam():
 
     # update 'ref' based on SUB variant calls (optional)
     if cfg.args.splice_subs:
-        print('    > splicing subs into reference')
-        # with mp.Pool() as pool:
-            # read_data = pool.map(splice_subs_into_ref(read_data))
+        print('\n    > parsing VCF')
+        cfg.args.subs = get_vcf_data()
+        print('\n    > splicing subs into reference')
+        with mp.Pool() as pool:
+            read_data = pool.map(splice_subs_into_ref(read_data))
 
     # align 'seq' to 'ref', update 'cigar'
     print('\n    > computing read realignments')
@@ -34,7 +37,8 @@ def realign_bam():
 
     # standardize CIGAR format, replace subs with indels
     if cfg.args.indels_only:
-        print('    > converting to standard INDEL format')
+        with cfg.read_count.get_lock(): cfg.read_count.value = 0
+        print('\n    > converting to standard INDEL format')
         with mp.Pool() as pool:
             read_data = pool.map(standardize_cigar, read_data)
 

@@ -307,5 +307,9 @@ def standardize_cigar(read_data):
 
     final_cigar = collapse_cigar(cigar0)
 
+    with cfg.read_count.get_lock():
+        cfg.read_count.value += 1
+        print(f"\r        {cfg.read_count.value} CIGARs standardized.", end='', flush=True)
+
     return (read_id, ref_name, start, final_cigar, ref, seq)
 
