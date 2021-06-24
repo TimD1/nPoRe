@@ -25,9 +25,10 @@ def realign_bam():
     if cfg.args.splice_subs:
         print('\n    > parsing VCF')
         cfg.args.subs = get_vcf_data()
+        with cfg.read_count.get_lock(): cfg.read_count.value = 0
         print('\n    > splicing subs into reference')
         with mp.Pool() as pool:
-            read_data = pool.map(splice_subs_into_ref(read_data))
+            read_data = pool.map(splice_subs_into_ref, read_data)
 
     # align 'seq' to 'ref', update 'cigar'
     print('\n    > computing read realignments')
@@ -43,6 +44,25 @@ def realign_bam():
             read_data = pool.map(standardize_cigar, read_data)
 
     return read_data
+
+
+def splice_subs_into_ref(read_data):
+
+    read_id, ref_name, start, stop, cigar, orig_ref, r, seq, hap = read_data
+
+    ref = list(orig_ref)
+    for pos, base in cfg.args.subs[ref_name][hap]:
+        if pos < start or pos >= stop:
+            continue
+        else:
+            ref[pos-start] = base
+    ref = ''.join(ref)
+
+    with cfg.read_count.get_lock():
+        cfg.read_count.value += 1
+        print(f"\r        {cfg.read_count.value} reads processed.", end='', flush=True)
+
+    return (read_id, ref_name, start, stop, cigar, orig_ref, ref, seq, hap)
    
 
 
@@ -78,9 +98,12 @@ def get_read_data():
             read.query_name,
             read.reference_name,
             read.reference_start,
+            read.reference_start + read.reference_length,
             read.cigarstring,
             read.get_reference_sequence().upper(),
+            read.get_reference_sequence().upper(),
             read.query_alignment_sequence.upper(),
+            int(read.get_tag('HP'))
         ))
         rds += 1
         print(f'\r        {rds} of {nreads} reads processed.', end='', flush=True)
@@ -91,8 +114,8 @@ def get_read_data():
 
 def realign_read(read_data):
 
-    read_id, ref_name, start, cigar, ref, seq = read_data
-    new_cigar = align(ref, seq, ref, cigar, cfg.args.sub_scores, cfg.args.hp_scores)
+    read_id, ref_name, start, stop, cigar, orig_ref, ref, seq, hap = read_data
+    new_cigar = align(ref, seq, orig_ref, cigar, cfg.args.sub_scores, cfg.args.hp_scores)
 
     with cfg.read_count.get_lock():
         cfg.read_count.value += 1

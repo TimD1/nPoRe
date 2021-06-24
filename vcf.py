@@ -6,8 +6,9 @@ import cfg
 def get_vcf_data():
     '''
     Parse VCF file into just sub information:
-    { 'ctg1': [ [(posX, baseX)...],     < hap1
-                [(posY, baseY)...] ]    < hap2
+    { 'ctg1': [ [(posX, baseX)...],     < unknown haplotype (homozygous subs only)
+                [(posY, baseY)...],     < hap1
+                [(posZ, baseZ)...]]     < hap2
       'ctg2': ...
     }
     '''
@@ -43,15 +44,17 @@ def get_vcf_data():
                 break
 
             if snp.contig not in vcf_dict:
-                vcf_dict[snp.contig] = [ [], [] ]
+                vcf_dict[snp.contig] = [ [], [], [] ]
 
             # homo vars
             if len(snp.alleles) == 2:
                 if len(snp.alleles[0]) == 1 and len(snp.alleles[1]) == 1:
-                    if gts[0]:
-                        vcf_dict[snp.contig][0].append((snp.start, snp.alleles[1]))
-                    if gts[1]:
+                    if gts[0]: # hap1
                         vcf_dict[snp.contig][1].append((snp.start, snp.alleles[1]))
+                    if gts[1]: # hap2
+                        vcf_dict[snp.contig][2].append((snp.start, snp.alleles[1]))
+                    if gts[0] and gts[1]: # unknown hap
+                        vcf_dict[snp.contig][0].append((snp.start, snp.alleles[1]))
 
             # hetero vars
             elif len(snp.alleles) == 3:
@@ -63,8 +66,8 @@ def get_vcf_data():
                     for hap_idx, gt in enumerate(gts):
                         if gt == 2:
                             vcf_dict[snp.contig][hap_idx].append((snp.start, snp.alleles[2][0]))
-        print(f'\r        {i} of {n} SNPs processed.', end='', flush=True)
-        return vcf_dict
+        print(f'\r        {i+1} of {n} SNPs processed.', end='', flush=True)
+    return vcf_dict
     
 
 
