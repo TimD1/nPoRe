@@ -14,7 +14,4 @@ bases = {'A': 0, 'C': 1, 'G': 2, 'T': 3}
 # convert Cigar to string
 cigar = 'MIDNSHP=XB'
 
-starts = None
-cigars = None
-
 __version__ = "0.0.1"

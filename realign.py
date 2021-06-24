@@ -33,7 +33,6 @@ def argparser():
 
     # algorithm parameters
     parser.add_argument("--max_hp", type=int, default=100)
-    parser.add_argument("--window", type=int, default=25)
     parser.add_argument("--chunk_width", type=int, default=10000)
 
     # path

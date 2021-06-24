@@ -125,173 +125,6 @@ def realign_read(read_data):
 
 
     
-def splice_realignments(read_data):
-    '''
-    Given ('read_id', [(pos1, cigar1), (pos2, cigar2)...]), return
-    the full alignment with a modified CIGAR string.
-    '''
-
-    # extract useful read data
-    read_id, subread_data = read_data
-    read_start = cfg.starts[read_id]
-    cigartuples = cfg.cigars[read_id]
-    cigar_types = [ c[0] for c in cigartuples ]
-    cigar_counts = [ c[1] for c in cigartuples ]
-    ref_idx = read_start
-    cigar = ''
-
-    for pos, subcigar in subread_data:
-        ref_start = pos - cfg.args.window
-        ref_end = pos + cfg.args.window
-
-        while ref_idx < ref_end and cigar_types:
-
-            # store cigar prefix
-            if ref_idx < ref_start:
-                cigar += cfg.cigar[cigar_types[0]]
-
-            # determine whether to move on read/ref
-            if cigar_types[0] == Cigar.S:    # soft-clipped
-                pass
-            elif cigar_types[0] == Cigar.H:    # hard-clipped
-                pass
-            elif cigar_types[0] == Cigar.X:    # substitution
-                ref_idx += 1
-            elif cigar_types[0] == Cigar.I:    # insertion
-                pass
-            elif cigar_types[0] == Cigar.D:    # deletion
-                ref_idx += 1
-            elif cigar_types[0] == Cigar.E:    # match
-                ref_idx += 1
-            elif cigar_types[0] == Cigar.M:    # match/sub
-                ref_idx += 1
-            else:
-                print(f"ERROR: unexpected CIGAR type for {read.query_name}")
-                exit(1)
-
-            # move to next CIGAR section of interest
-            cigar_counts[0] -= 1
-            if cigar_counts[0] == 0:
-                del cigar_types[0]
-                del cigar_counts[0]
-
-        # add cigar from this subsection of read
-        cigar += subcigar
-
-    cigar += extend_pysam_cigar(cigar_types, cigar_counts)
-    cigar = collapse_cigar(cigar)
-    with cfg.read_count.get_lock():
-        cfg.read_count.value += 1
-        print(f"\r    {cfg.read_count.value} reads processed.", end='', flush=True)
-
-    return (read_id, cigar)
-
-
-
-def realign_pos(data):
-    '''
-    Re-align all reads covering a single reference column (within window).
-    '''
-
-    pos, alleles, gt = data
-    alignments = []
-    bam = pysam.AlignmentFile(cfg.args.bam, 'rb')
-
-    ref_start = pos-cfg.args.window
-    ref_end = pos+cfg.args.window
-
-    for read in bam.fetch(cfg.args.contig, pos, pos+1):
-
-        # skip read if it doesn't fully cover the window
-        ref = read.get_reference_sequence().upper() \
-                [ref_start-read.reference_start : ref_end-read.reference_start]
-        if len(ref) < ref_end - ref_start: continue
-
-        # find read substring overlapping region
-        cigar_types = [ c[0] for c in read.cigartuples ]
-        cigar_counts = [ c[1] for c in read.cigartuples ]
-        read_idx, ref_idx = 0, read.reference_start
-        read_start, read_end, first = None, None, True
-        pre_cigar = ''
-
-        while ref_idx < ref_end:
-            cigar = cigar_types[0]
-
-            # first read position overlapping region
-            if first and ref_idx >= ref_start:
-                first = False
-                read_start = read_idx
-
-            # store cigar prefix
-            if ref_idx < ref_start:
-                pre_cigar += cfg.cigar[cigar]
-
-            # determine whether to move on read/ref
-            if cigar == Cigar.S:    # soft-clipped
-                read_idx += 1
-            elif cigar == Cigar.H:    # hard-clipped
-                pass
-            elif cigar == Cigar.X:    # substitution
-                read_idx += 1
-                ref_idx += 1
-            elif cigar == Cigar.I:    # insertion
-                read_idx += 1
-            elif cigar == Cigar.D:    # deletion
-                ref_idx += 1
-            elif cigar == Cigar.E:    # match
-                read_idx += 1
-                ref_idx += 1
-            elif cigar == Cigar.M:    # match/sub
-                read_idx += 1
-                ref_idx += 1
-            else:
-                print(f"ERROR: unexpected CIGAR type for {read.query_name}")
-                exit(1)
-
-            # move to next CIGAR section of interest
-            cigar_counts[0] -= 1
-            if cigar_counts[0] == 0:
-                del cigar_counts[0]
-                del cigar_types[0]
-
-        # extract read section
-        read_end = read_idx
-        seq = read.query_sequence[read_start:read_end]
-
-        # if there's a substitution variant, alter reference
-        ref_base = ref[cfg.args.window]
-        hap = int(read.get_tag('HP'))-1
-        if hap < 0: # unphased
-            if gt[0] == gt[1]: # haplotype variants identical
-                if not None in gt and len(alleles[0]) == 1 and len(alleles[gt[0]]) == 1: # sub
-                    real_base = alleles[gt[0]]
-                else: 
-                    real_base = ref_base
-            else:
-                real_base = ref_base
-        else:
-            # TODO: combo of sub and deletion will fail here (uncommon, ignoring)
-            if not None in gt and len(alleles[0]) == 1 and len(alleles[gt[hap]]) == 1: # hap sub
-                real_base = alleles[gt[hap]]
-            else:
-                real_base = ref_base
-        # print(f"position {pos}, hap {hap}, gt {gt}, alleles {alleles}, called {real_base}")
-        orig_ref = ref
-        ref = ref[:cfg.args.window] + real_base + ref[cfg.args.window+1:]
-        
-        cigar = align(ref, seq, orig_ref, cfg.args.sub_scores, cfg.args.hp_scores)
-        # dump(ref, seq, cigar)
-        new_cigar = standardize_cigar(cigar, ref, seq)
-        alignments.append((read.query_name, pos, new_cigar))
-
-    with cfg.pos_count.get_lock():
-        cfg.pos_count.value += 1
-        print(f"\r    {cfg.pos_count.value} positions processed.", end='', flush=True)
-
-    return alignments
-
-
-
 def write_results(alignments, outfile):
     '''
     Write a `.bam` file for a set of alignments.
@@ -307,8 +140,7 @@ def write_results(alignments, outfile):
                    'SO': 'coordinate'
                },
                'SQ': [{'LN': l, 'SN': ctg} for l, ctg in \
-                       zip(bam.lengths, bam.references) if \
-                       re.match("^chr[0-9A-Za-z][0-9a-zA-Z]?$", ctg)],
+                       zip(bam.lengths, bam.references)],
                'PG': [{
                    'PN': 'realigner',
                    'ID': 'realigner',
@@ -339,8 +171,7 @@ def write_results(alignments, outfile):
             new_alignment.tags            = old_alignment.tags
             if new_alignment.has_tag('MD'):
                 new_alignment.set_tag('MD', None)
-            new_alignment.reference_id    = list([ctg for ctg in bam.references \
-                    if re.match("^chr[0-9A-Za-z][0-9a-zA-Z]?$", ctg)]).index(cfg.args.contig)
+            new_alignment.reference_id    = bam.references.index(cfg.args.contig)
             new_alignment.cigarstring     = cigar
             fh.write(new_alignment)
 
@@ -584,4 +415,3 @@ def calc_confusion_matrices(range_tuple):
             f" ({cfg.args.contig}:{cfg.args.contig_beg}:{cfg.args.contig_end}).", end='', flush=True)
 
     return subs, hps
-
