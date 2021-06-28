@@ -6,8 +6,11 @@ BAM="$DIR/$BC/deep_variant/intermediate_files/MARGIN_PHASED.PEPPER_SNP_MARGIN.ha
 REF="$DIR/ref/GCA_000001405.15_GRCh38_no_alt_analysis_set.fasta"
 VCF="$DIR/$BC/deep_variant/deepvariant.phased.vcf.gz"
 
+# run Cython build
+python3 setup.py build_ext --inplace
+
 # run ReAligner
-python3 realign.py \
+time python3 realign.py \
     $BAM \
     $REF \
     --vcf $VCF \

@@ -6,7 +6,6 @@ import matplotlib.pyplot as plt
 import os, re, itertools, sys
 
 import pysam
-from numba import njit
 
 import cfg
 
@@ -37,7 +36,6 @@ def collapse_cigar(extended_cigar):
 
 
 
-@njit()
 def expand_cigar(cigar):
     ''' 
     Converts CIGAR string to list of ops. 
@@ -96,7 +94,6 @@ def extend_pysam_cigar(ops, counts):
 
 
 
-@njit()
 def push_dels_left(cigar, ref):
     ''' Push CIGAR deletions leftwards. '''
 
@@ -163,7 +160,6 @@ def push_dels_left(cigar, ref):
 
 
 
-@njit()
 def push_inss_left(cigar, seq):
     ''' Push CIGAR insertions leftwards. '''
 
@@ -239,7 +235,6 @@ def subs_to_indels(cigar):
 
 
 
-@njit()
 def push_inss_thru_dels(cigar):
     ''' Enable CIGAR insertions to be pushed leftward through deletions. '''
 
@@ -268,7 +263,6 @@ def push_inss_thru_dels(cigar):
 
 
 
-@njit()
 def seq_len(cigar):
     length = 0
     for op in cigar:
@@ -276,7 +270,6 @@ def seq_len(cigar):
             length += 1
     return length
 
-@njit()
 def ref_len(cigar):
     length = 0
     for op in cigar:
@@ -290,6 +283,7 @@ def standardize_cigar(read_data):
     ''' Try to force all INDELs into beginning of repetitive region. '''
 
     read_id, ref_name, start, cigar, ref, seq = read_data
+    cigar = expand_cigar(cigar)
 
     cigar0 = subs_to_indels(cigar)
 

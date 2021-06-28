@@ -1,0 +1,5 @@
+#!/bin/bash
+
+program="$1"
+
+cython -a --3str ${program}.pyx

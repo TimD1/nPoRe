@@ -5,7 +5,6 @@ from collections import defaultdict
 import pysam
 
 import cfg
-from vcf import get_positions
 from aln import *
 from bam import *
 
