@@ -93,12 +93,12 @@ def calc_score_matrices(subs, hps):
     hp_scores = fix_matrix_properties(hp_scores)
 
     # calculate substitution scores matrix
-    sub_scores = np.zeros_like(subs, dtype=np.float32)
-    for i in range(len(cfg.bases)):
-        total = np.sum(subs[i])
-        for j in range(len(cfg.bases)):
+    sub_scores = np.zeros((len(cfg.bases),len(cfg.bases)), dtype=np.float32)
+    for i in range(1, len(cfg.bases)):
+        total = np.sum(subs[i-1])
+        for j in range(1, len(cfg.bases)):
             if i != j:
-                sub_scores[i, j] = -np.log( (subs[i,j]+0.1) / total )
+                sub_scores[i, j] = -np.log( (subs[i-1,j-1]+0.1) / total )
             else:
                 sub_scores[i, j] = 0
 
@@ -264,8 +264,8 @@ cdef float get_max(float[:,:,:,:] matrix, int row, int col, int typs, int VALUE)
 # @profile
 @cython.boundscheck(False)
 @cython.wraparound(False)
-cpdef align(char[:] ref, char[:] seq, char[:] orig_ref, str cigar, 
-        float[:,:] sub_scores, float[:,:] hp_scores, 
+cpdef align(char[::1] ref, char[::1] seq, char[::1] orig_ref, str cigar, 
+        float[:,::1] sub_scores, float[:,::1] hp_scores, 
         float indel_start=5, float indel_extend=2, 
         int r = 30, int verbosity=0):
     ''' Perform alignment. 
@@ -287,6 +287,7 @@ cpdef align(char[:] ref, char[:] seq, char[:] orig_ref, str cigar,
     cdef int a_rows = len(seq) + 1
     cdef int a_cols = len(ref) + 1
     cdef int b_rows = len(seq) + len(ref) + 1
+    cdef int max_rows = 110000
     cdef int b_cols = 2*r + 1
 
     cdef int dims = 3
@@ -304,8 +305,8 @@ cpdef align(char[:] ref, char[:] seq, char[:] orig_ref, str cigar,
     # precompute hompolymers
     cdef int[:] ref_hp_lens = get_hp_lengths(ref)
 
-    matrix_buf = np.zeros((typs, b_rows, b_cols, dims), dtype=np.float32)
-    cdef float[:,:,:,:] matrix = matrix_buf
+    matrix_buf = np.zeros((typs, max_rows, b_cols, dims), dtype=np.float32)
+    cdef float[:,:,:,::1] matrix = matrix_buf
 
     # calculate matrix
     cdef int b_row, b_col, a_row, a_col, ref_idx, seq_idx

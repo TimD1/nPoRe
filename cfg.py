@@ -9,7 +9,7 @@ read_count = mp.Value('i', 0)
 results_count = mp.Value('i', 0)
 
 # global enum for bases ACGT
-bases = {'A': 0, 'C': 1, 'G': 2, 'T': 3}
+bases = {'N': 0, 'A': 1, 'C': 2, 'G': 3, 'T': 4}
 
 # convert Cigar to string
 cigar = 'MIDNSHP=XB'
