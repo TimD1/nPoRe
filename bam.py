@@ -127,12 +127,9 @@ def realign_read(read_data):
         int_seq[i] = cfg.bases[seq[i]]
 
     # align
-    if len(ref) + len(seq) + 1 > 110000:
-        new_cigar = collapse_cigar(expand_cigar(cigar[:]).replace('S',''))
-    else:
-        new_cigar = align(int_ref, int_seq, int_orig_ref, cigar, 
-                cfg.args.sub_scores, cfg.args.hp_scores)
-        new_cigar = collapse_cigar(new_cigar)
+    new_cigar = align(int_ref, int_seq, int_orig_ref, cigar, 
+            cfg.args.sub_scores, cfg.args.hp_scores)
+    new_cigar = collapse_cigar(new_cigar)
 
     with cfg.read_count.get_lock():
         cfg.read_count.value += 1

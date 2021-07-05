@@ -1,4 +1,5 @@
 import numpy as np
+import math
 np.set_printoptions(linewidth=200)
 import matplotlib.pyplot as plt
 from mpl_toolkits import mplot3d
@@ -261,401 +262,322 @@ cdef float get_max(float[:,:,:,:] matrix, int row, int col, int typs, int VALUE)
     return max_val
 
 
-# @profile
+
+@cython.boundscheck(False)
+@cython.wraparound(False)
+cdef int[:] get_breaks(int chunk_size, int array_size):
+    cdef int buf_len = 1 + math.ceil( (array_size-1) / (chunk_size-1) )
+    breaks_buf = np.zeros(buf_len, dtype=np.intc)
+    cdef int[:] breaks = breaks_buf
+    cdef int i
+    for i in range(buf_len-1):
+        breaks[i] = i * (chunk_size-1)
+    breaks[buf_len-1] = array_size-1
+    return breaks
+
+
+
 @cython.boundscheck(False)
 @cython.wraparound(False)
 cpdef align(char[::1] ref, char[::1] seq, char[::1] orig_ref, str cigar, 
         float[:,::1] sub_scores, float[:,::1] hp_scores, 
-        float indel_start=5, float indel_extend=2, 
-        int r = 30, int verbosity=0):
-    ''' Perform alignment. 
-    verbosity:
-     0 -> no printing
-     1 -> print final matrix
-     2 -> print each cell (with pointers and scores)
-    '''
+        float indel_start=5, float indel_extend=2, int max_b_rows = 100001,
+        int r = 30):
+    ''' Perform alignment.  '''
 
     # convert CIGAR so that each movement is row+1 or col+1, enables easy banding
     cigar = expand_cigar(cigar)
     cigar = cigar.replace('X','DI').replace('=','DI') \
             .replace('M','DI').replace('S','')
 
+    # precompute offsets, breakpoints, and homopolymers
     cdef int[:] inss = get_inss(cigar)
     cdef int[:] dels = get_dels(cigar)
+    cdef int[:] breaks = get_breaks(max_b_rows, len(seq) + len(ref) + 1)
+    cdef int[:] ref_hp_lens = get_hp_lengths(ref)
 
-    # set helpful constants
+    # define useful constants
     cdef int a_rows = len(seq) + 1
     cdef int a_cols = len(ref) + 1
-    cdef int b_rows = len(seq) + len(ref) + 1
-    cdef int max_rows = 110000
     cdef int b_cols = 2*r + 1
+    cdef int b_rows = -1
 
     cdef int dims = 3
     cdef int VALUE = 0
     cdef int TYPE = 1
     cdef int RUNLEN = 2
 
-    cdef int typs = 5# types
-    cdef int MAT = 0 # substitution
-    cdef int INS = 1 # insertion
-    cdef int LHP = 2 # lengthen homopolymer
-    cdef int DEL = 3 # deletion
-    cdef int SHP = 4 # shorten homopolymer
+    cdef int typs = 5 # types
+    cdef int MAT = 0  # match/substitution
+    cdef int INS = 1  # insertion
+    cdef int LHP = 2  # lengthen homopolymer
+    cdef int DEL = 3  # deletion
+    cdef int SHP = 4  # shorten homopolymer
 
-    # precompute hompolymers
-    cdef int[:] ref_hp_lens = get_hp_lengths(ref)
-
-    matrix_buf = np.zeros((typs, max_rows, b_cols, dims), dtype=np.float32)
-    cdef float[:,:,:,::1] matrix = matrix_buf
-
-    # calculate matrix
-    cdef int b_row, b_col, a_row, a_col, ref_idx, seq_idx
-    cdef int b_top0, b_top1, b_left0, b_left1, b_diag0, b_diag1
-    cdef int typ, i
-    cdef float start_val, end_val
-    cdef float min_val, max_val, ins_val, del_val, shp_val, lhp_val, sub_val
-    cdef int ins_run, del_run, shp_run, lhp_run, runlen
-    for b_row in range(b_rows):
-        for b_col in range(b_cols):
-
-            # precompute useful positions
-            a_row = b_to_a0(b_row, b_col, inss, dels, r)
-            a_col = b_to_a1(b_row, b_col, inss, dels, r)
-            ref_idx = a_col - 1
-            seq_idx = a_row - 1
-            b_top0 = a_to_b0(a_row-1, a_col, inss, dels, r)
-            b_top1 = a_to_b1(a_row-1, a_col, inss, dels, r)
-            b_left0 = a_to_b0(a_row, a_col-1, inss, dels, r)
-            b_left1 = a_to_b1(a_row, a_col-1, inss, dels, r)
-            b_diag0 = a_to_b0(a_row-1, a_col-1, inss, dels, r)
-            b_diag1 = a_to_b1(a_row-1, a_col-1, inss, dels, r)
-
-            # skip cells out of range of original "A" matrix
-            if a_row < 0 or a_col < 0 or a_row >= a_rows or a_col >= a_cols:
-                continue
-
-            # very first cell has no score (necessary to skip other elifs)
-            elif a_row == 0 and a_col == 0:
-                continue
-
-            # initialize first row/col of matrix A
-            elif a_row == 0:
-                for typ in range(typs):
-                    if typ == INS or typ == LHP:
-                        del_val = indel_start + (100+indel_extend)*(a_col-1)
-                    else:
-                        del_val = indel_start + indel_extend*(a_col-1)
-                    matrix[typ, b_row, b_col, VALUE] = del_val
-                    matrix[typ, b_row, b_col, TYPE] = DEL
-                    matrix[typ, b_row, b_col, RUNLEN] = a_col
-                continue
-            elif a_col == 0:
-                for typ in range(typs):
-                    if typ == DEL or typ == SHP:
-                        ins_val = indel_start + (100+indel_extend)*(a_row-1)
-                    else:
-                        ins_val = indel_start + indel_extend*(a_row-1)
-                    matrix[typ, b_row, b_col, VALUE] = ins_val
-                    matrix[typ, b_row, b_col, TYPE] = INS
-                    matrix[typ, b_row, b_col, RUNLEN] = a_row
-                continue
-
-            # shouldn't be possible
-            elif b_row == 0:
-                print("ERROR: b_row == 0")
-
-            # enforce new path remains within r cells of original path
-            elif b_col == 0 or b_col == 2*r:
-                max_val = get_max(matrix, b_row-1, b_col, typs, VALUE) + 100
-                for typ in range(typs):
-                    matrix[typ, b_row, b_col, VALUE] = max_val
-                    matrix[typ, b_row, b_col, TYPE] = MAT
-                    matrix[typ, b_row, b_col, RUNLEN] = 0
-                continue
-
-
-            # UPDATE INS MATRIX
-            # continue INS
-            if a_row == 1:
-                ins_run = 1
-            else:
-                ins_run = <int>(matrix[INS, b_top0, b_top1, RUNLEN]) + 1
-            ins_val = matrix[INS, b_top0, b_top1, VALUE] + indel_extend
-            matrix[INS, b_row, b_col, VALUE] = ins_val
-            matrix[INS, b_row, b_col, TYPE] = INS
-            matrix[INS, b_row, b_col, RUNLEN] = ins_run
-
-            # start INS
-            start_val = matrix[MAT, b_top0, b_top1, VALUE] + indel_start
-            if start_val < ins_val:
-                matrix[INS, b_row, b_col, VALUE] = start_val
-                matrix[INS, b_row, b_col, TYPE] = INS
-                matrix[INS, b_row, b_col, RUNLEN] = 1
-
-
-            # UPDATE DEL MATRIX
-            # continue DEL
-            if a_col == 1:
-                del_run = 1
-            else:
-                del_run = <int>(matrix[DEL, b_left0, b_left1, RUNLEN]) + 1
-            del_val = matrix[DEL, b_left0, b_left1, VALUE] + indel_extend
-            matrix[DEL, b_row, b_col, VALUE] = del_val
-            matrix[DEL, b_row, b_col, TYPE] = DEL
-            matrix[DEL, b_row, b_col, RUNLEN] = del_run
-
-            # start DEL
-            start_val = matrix[MAT, b_left0, b_left1, VALUE] + indel_start
-            if start_val < del_val:
-                matrix[DEL, b_row, b_col, VALUE] = start_val
-                matrix[DEL, b_row, b_col, TYPE] = DEL
-                matrix[DEL, b_row, b_col, RUNLEN] = 1
-
-
-            # UPDATE LHP MATRIX
-            if seq_idx+2 < a_rows-1 and ref_idx+1 < a_cols-1 and \
-                    seq[seq_idx+1] == seq[seq_idx+2]: # only insert same base
-
-                # continue LHP
-                if a_row == 1:
-                    lhp_run = 1
-                else:
-                    lhp_run = <int>(matrix[LHP, b_top0, b_top1, RUNLEN]) + 1
-                lhp_val = matrix[LHP, 
-                        a_to_b0(a_row-lhp_run, a_col, inss, dels, r), 
-                        a_to_b1(a_row-lhp_run, a_col, inss, dels, r), VALUE] + \
-                        hp_indel_score(ref_hp_lens[ref_idx+1], lhp_run, hp_scores)
-                matrix[LHP, b_row, b_col, VALUE] = lhp_val
-                matrix[LHP, b_row, b_col, TYPE] = LHP
-                matrix[LHP, b_row, b_col, RUNLEN] = lhp_run
-
-                # start LHP
-                start_val = matrix[MAT, b_top0, b_top1, VALUE] + \
-                        hp_indel_score(ref_hp_lens[ref_idx+1], 1, hp_scores)
-                if start_val < lhp_val:
-                    matrix[LHP, b_row, b_col, VALUE] = start_val
-                    matrix[LHP, b_row, b_col, TYPE] = LHP
-                    matrix[LHP, b_row, b_col, RUNLEN] = 1
-
-            else: # don't allow insertion of different base
-                lhp_val = matrix[MAT, b_diag0, b_diag1, VALUE] + 100
-                matrix[LHP, b_row, b_col, VALUE] = lhp_val
-                matrix[LHP, b_row, b_col, TYPE] = LHP
-                matrix[LHP, b_row, b_col, RUNLEN] = 0
-
-
-            # UPDATE SHP MATRIX
-            if ref_idx+1 < a_cols-1 and \
-                    ref[ref_idx+1] == ref[ref_idx]: # only delete same base
-
-                # continue SHP
-                if a_col == 1:
-                    shp_run = 1
-                else:
-                    shp_run = <int>(matrix[SHP, b_left0, b_left1, RUNLEN] + 1)
-                shp_val = matrix[SHP, 
-                        a_to_b0(a_row, a_col-shp_run, inss, dels, r), 
-                        a_to_b1(a_row, a_col-shp_run, inss, dels, r), VALUE] + \
-                        hp_indel_score(ref_hp_lens[ref_idx], -shp_run, hp_scores)
-                matrix[SHP, b_row, b_col, VALUE] = shp_val
-                matrix[SHP, b_row, b_col, TYPE] = SHP
-                matrix[SHP, b_row, b_col, RUNLEN] = shp_run
-
-                # start SHP
-                start_val = matrix[MAT, b_left0, b_left1, VALUE] + \
-                    hp_indel_score(ref_hp_lens[ref_idx], -1, hp_scores)
-                if start_val < shp_val:
-                    matrix[SHP, b_row, b_col, VALUE] = start_val
-                    matrix[SHP, b_row, b_col, TYPE] = SHP
-                    matrix[SHP, b_row, b_col, RUNLEN] = 1
-
-            else: # don't allow deleting different base
-                shp_val = matrix[MAT, b_diag0, b_diag1, VALUE] + 100
-                matrix[SHP, b_row, b_col, VALUE] = shp_val
-                matrix[SHP, b_row, b_col, TYPE] = SHP
-                matrix[SHP, b_row, b_col, RUNLEN] = 0
-
-
-            # UPDATE MAT MATRIX
-            if matrix[MAT, b_diag0, b_diag1, TYPE] == MAT:
-                runlen = <int>(matrix[MAT, b_diag0, b_diag1, RUNLEN]) + 1
-            else:
-                runlen = 1
-            sub_val = matrix[MAT, b_diag0, b_diag1, VALUE] + \
-                    sub_scores[ seq[seq_idx], ref[ref_idx] ]
-            min_val = sub_val
-            matrix[MAT, b_row, b_col, VALUE] = min_val
-            matrix[MAT, b_row, b_col, TYPE] = MAT
-            matrix[MAT, b_row, b_col, RUNLEN] = runlen
-
-            # end INDEL
-            if verbosity >= 2:
-                print("REF:", ref)
-                s = "     "
-                for x in range(ref_idx):
-                    s += " "
-                s += "^"
-                print(s)
-
-                print("SEQ:", seq)
-                s = "     "
-                for x in range(seq_idx):
-                    s += " "
-                s += "^"
-                print(s)
-                print("M", sub_val)
-            for typ in [INS, LHP, DEL, SHP]:
-
-                end_val = matrix[typ, b_row, b_col, VALUE]
-                if verbosity >= 2:
-                    chars = "MILDS"
-                    print(chars[typ], end_val)
-                if end_val < min_val:
-                    min_val = end_val
-                    runlen = <int>(matrix[typ, b_row, b_col, RUNLEN])
-                    matrix[MAT, b_row, b_col, VALUE] = min_val
-                    matrix[MAT, b_row, b_col, TYPE] = typ
-                    matrix[MAT, b_row, b_col, RUNLEN] = runlen
-            if verbosity >= 2:
-                print("\n")
-
-
-    # initialize backtracking from last cell
     cdef str aln = ''
+    cdef str full_aln = ''
     cdef str op
     path = []
-    cdef int row = a_rows - 1
-    cdef int col = a_cols - 1
-    cdef float val
-    b_pos0 = a_to_b0(row, col, inss, dels, r)
-    b_pos1 = a_to_b1(row, col, inss, dels, r)
-    typ = <int>(matrix[MAT, b_pos0, b_pos1, VALUE])
+    matrix_buf = np.zeros((typs, max_b_rows, b_cols, dims), dtype=np.float32)
+    cdef float[:,:,:,::1] matrix = matrix_buf
 
-    # backtrack
-    while row > 0 or col > 0:
-        if row < 0:
-            print("\nERROR: row < 0 @  A: (", row, 
-                    ",", col, "), B: (", b_pos0, ",", b_pos1, ").")
-            break
-        if col < 0:
-            print("\nERROR: col < 0 @  A: (", row, 
-                    ",", col, "), B: (", b_pos0, ",", b_pos1, ").")
-            break
-        path.append((MAT, row, col))
-        b_pos0 = a_to_b0(row, col, inss, dels, r)
+    cdef int row, col, b_row, b_col, a_row, a_col, ref_idx, seq_idx
+    cdef int b_top0, b_top1, b_left0, b_left1, b_diag0, b_diag1, b_pos0, b_pos1
+    cdef int typ, i, brk, next_brk, brk_idx
+    cdef float start_val, end_val, val
+    cdef float min_val, max_val, ins_val, del_val, shp_val, lhp_val, sub_val
+    cdef int ins_run, del_run, shp_run, lhp_run, runlen
+
+    # iterate over b matrix in chunks set by breakpoints
+    for brk_idx in range(len(breaks)-1):
+        brk = breaks[brk_idx]
+        next_brk = breaks[brk_idx+1]
+        b_rows = next_brk - brk + 1
+        matrix_buf.fill(0)
+
+        # calculate matrix chunk
+        for b_row in range(b_rows):
+            for b_col in range(b_cols):
+
+                # precompute useful positions
+                a_row = b_to_a0(b_row + brk, b_col, inss, dels, r)
+                a_col = b_to_a1(b_row + brk, b_col, inss, dels, r)
+                ref_idx = a_col - 1
+                seq_idx = a_row - 1
+                b_top0 = a_to_b0(a_row-1, a_col, inss, dels, r) - brk
+                b_top1 = a_to_b1(a_row-1, a_col, inss, dels, r)
+                b_left0 = a_to_b0(a_row, a_col-1, inss, dels, r) - brk
+                b_left1 = a_to_b1(a_row, a_col-1, inss, dels, r)
+                b_diag0 = a_to_b0(a_row-1, a_col-1, inss, dels, r) - brk
+                b_diag1 = a_to_b1(a_row-1, a_col-1, inss, dels, r)
+
+                # skip cells out of range of this chunk of original "A" matrix
+                if a_row < inss[brk] or a_col < dels[brk] or \
+                        a_row > inss[next_brk] or a_col > dels[next_brk]:
+                    continue
+
+                # very first cell has no score (necessary to skip other elifs)
+                elif a_row == inss[brk] and a_col == dels[brk]:
+                    continue
+
+                # initialize first row/col of matrix A
+                elif a_row == inss[brk]:
+                    for typ in range(typs):
+                        if typ == INS or typ == LHP: # don't allow
+                            del_val = indel_start + (100+indel_extend)*(a_col-dels[brk]-1)
+                        else:
+                            del_val = indel_start + indel_extend*(a_col-dels[brk]-1)
+                        matrix[typ, b_row, b_col, VALUE] = del_val
+                        matrix[typ, b_row, b_col, TYPE] = DEL
+                        matrix[typ, b_row, b_col, RUNLEN] = a_col - dels[brk]
+                    continue
+                elif a_col == dels[brk]:
+                    for typ in range(typs):
+                        if typ == DEL or typ == SHP: # don't allow
+                            ins_val = indel_start + (100+indel_extend)*(a_row-inss[brk]-1)
+                        else:
+                            ins_val = indel_start + indel_extend*(a_row-inss[brk]-1)
+                        matrix[typ, b_row, b_col, VALUE] = ins_val
+                        matrix[typ, b_row, b_col, TYPE] = INS
+                        matrix[typ, b_row, b_col, RUNLEN] = a_row - inss[brk]
+                    continue
+
+                # shouldn't happen
+                elif b_row == 0:
+                    print("ERROR: b_row == 0")
+
+                # enforce new path remains within r cells of original path
+                elif b_col == 0 or b_col == 2*r:
+                    max_val = get_max(matrix, b_row-1, b_col, typs, VALUE) + 100
+                    for typ in range(typs):
+                        matrix[typ, b_row, b_col, VALUE] = max_val
+                        matrix[typ, b_row, b_col, TYPE] = MAT
+                        matrix[typ, b_row, b_col, RUNLEN] = 0
+                    continue
+
+
+                # UPDATE INS MATRIX
+                # continue INS
+                if a_row == inss[brk] + 1:
+                    ins_run = 1
+                else:
+                    ins_run = <int>(matrix[INS, b_top0, b_top1, RUNLEN]) + 1
+                ins_val = matrix[INS, b_top0, b_top1, VALUE] + indel_extend
+                matrix[INS, b_row, b_col, VALUE] = ins_val
+                matrix[INS, b_row, b_col, TYPE] = INS
+                matrix[INS, b_row, b_col, RUNLEN] = ins_run
+
+                # start INS
+                start_val = matrix[MAT, b_top0, b_top1, VALUE] + indel_start
+                if start_val < ins_val:
+                    matrix[INS, b_row, b_col, VALUE] = start_val
+                    matrix[INS, b_row, b_col, TYPE] = INS
+                    matrix[INS, b_row, b_col, RUNLEN] = 1
+
+
+                # UPDATE DEL MATRIX
+                # continue DEL
+                if a_col == dels[brk] + 1:
+                    del_run = 1
+                else:
+                    del_run = <int>(matrix[DEL, b_left0, b_left1, RUNLEN]) + 1
+                del_val = matrix[DEL, b_left0, b_left1, VALUE] + indel_extend
+                matrix[DEL, b_row, b_col, VALUE] = del_val
+                matrix[DEL, b_row, b_col, TYPE] = DEL
+                matrix[DEL, b_row, b_col, RUNLEN] = del_run
+
+                # start DEL
+                start_val = matrix[MAT, b_left0, b_left1, VALUE] + indel_start
+                if start_val < del_val:
+                    matrix[DEL, b_row, b_col, VALUE] = start_val
+                    matrix[DEL, b_row, b_col, TYPE] = DEL
+                    matrix[DEL, b_row, b_col, RUNLEN] = 1
+
+
+                # UPDATE LHP MATRIX
+                if seq_idx+2 < a_rows-1 and ref_idx+1 < a_cols-1 and \
+                        seq[seq_idx+1] == seq[seq_idx+2]: # only insert same base
+
+                    # continue LHP
+                    if a_row == inss[brk] + 1:
+                        lhp_run = 1
+                    else:
+                        lhp_run = <int>(matrix[LHP, b_top0, b_top1, RUNLEN]) + 1
+                    lhp_val = matrix[LHP, 
+                            a_to_b0(a_row-lhp_run, a_col, inss, dels, r) - brk, 
+                            a_to_b1(a_row-lhp_run, a_col, inss, dels, r), VALUE] + \
+                            hp_indel_score(ref_hp_lens[ref_idx+1], lhp_run, hp_scores)
+                    matrix[LHP, b_row, b_col, VALUE] = lhp_val
+                    matrix[LHP, b_row, b_col, TYPE] = LHP
+                    matrix[LHP, b_row, b_col, RUNLEN] = lhp_run
+
+                    # start LHP
+                    start_val = matrix[MAT, b_top0, b_top1, VALUE] + \
+                            hp_indel_score(ref_hp_lens[ref_idx+1], 1, hp_scores)
+                    if start_val < lhp_val:
+                        matrix[LHP, b_row, b_col, VALUE] = start_val
+                        matrix[LHP, b_row, b_col, TYPE] = LHP
+                        matrix[LHP, b_row, b_col, RUNLEN] = 1
+
+                else: # don't allow insertion of different base
+                    lhp_val = matrix[MAT, b_diag0, b_diag1, VALUE] + 100
+                    matrix[LHP, b_row, b_col, VALUE] = lhp_val
+                    matrix[LHP, b_row, b_col, TYPE] = LHP
+                    matrix[LHP, b_row, b_col, RUNLEN] = 0
+
+
+                # UPDATE SHP MATRIX
+                if ref_idx+1 < a_cols-1 and \
+                        ref[ref_idx+1] == ref[ref_idx]: # only delete same base
+
+                    # continue SHP
+                    if a_col == dels[brk] + 1:
+                        shp_run = 1
+                    else:
+                        shp_run = <int>(matrix[SHP, b_left0, b_left1, RUNLEN] + 1)
+                    shp_val = matrix[SHP, 
+                            a_to_b0(a_row, a_col-shp_run, inss, dels, r) - brk, 
+                            a_to_b1(a_row, a_col-shp_run, inss, dels, r), VALUE] + \
+                            hp_indel_score(ref_hp_lens[ref_idx], -shp_run, hp_scores)
+                    matrix[SHP, b_row, b_col, VALUE] = shp_val
+                    matrix[SHP, b_row, b_col, TYPE] = SHP
+                    matrix[SHP, b_row, b_col, RUNLEN] = shp_run
+
+                    # start SHP
+                    start_val = matrix[MAT, b_left0, b_left1, VALUE] + \
+                        hp_indel_score(ref_hp_lens[ref_idx], -1, hp_scores)
+                    if start_val < shp_val:
+                        matrix[SHP, b_row, b_col, VALUE] = start_val
+                        matrix[SHP, b_row, b_col, TYPE] = SHP
+                        matrix[SHP, b_row, b_col, RUNLEN] = 1
+
+                else: # don't allow deleting different base
+                    shp_val = matrix[MAT, b_diag0, b_diag1, VALUE] + 100
+                    matrix[SHP, b_row, b_col, VALUE] = shp_val
+                    matrix[SHP, b_row, b_col, TYPE] = SHP
+                    matrix[SHP, b_row, b_col, RUNLEN] = 0
+
+
+                # UPDATE MAT MATRIX
+                if matrix[MAT, b_diag0, b_diag1, TYPE] == MAT:
+                    runlen = <int>(matrix[MAT, b_diag0, b_diag1, RUNLEN]) + 1
+                else:
+                    runlen = 1
+                sub_val = matrix[MAT, b_diag0, b_diag1, VALUE] + \
+                        sub_scores[ seq[seq_idx], ref[ref_idx] ]
+                min_val = sub_val
+                matrix[MAT, b_row, b_col, VALUE] = min_val
+                matrix[MAT, b_row, b_col, TYPE] = MAT
+                matrix[MAT, b_row, b_col, RUNLEN] = runlen
+
+                # end INDEL
+                for typ in [INS, LHP, DEL, SHP]:
+                    end_val = matrix[typ, b_row, b_col, VALUE]
+                    if end_val < min_val:
+                        min_val = end_val
+                        runlen = <int>(matrix[typ, b_row, b_col, RUNLEN])
+                        matrix[MAT, b_row, b_col, VALUE] = min_val
+                        matrix[MAT, b_row, b_col, TYPE] = typ
+                        matrix[MAT, b_row, b_col, RUNLEN] = runlen
+
+
+        # initialize backtracking from last cell
+        row = inss[next_brk]
+        col = dels[next_brk]
+        path = []
+        aln = ''
+        b_pos0 = a_to_b0(row, col, inss, dels, r) - brk
         b_pos1 = a_to_b1(row, col, inss, dels, r)
-        val = matrix[MAT, b_pos0, b_pos1, VALUE]
-        typ = <int>(matrix[MAT, b_pos0, b_pos1, TYPE])
-        runlen = <int>(matrix[MAT, b_pos0, b_pos1, RUNLEN])
+        typ = <int>(matrix[MAT, b_pos0, b_pos1, VALUE])
+        runlen = 0
 
-        # Invalid SHPs and LHPs are runlen 0. They should never be reached during 
-        # backtracking (due to high penalties), but leaving this here just-in-case
-        if runlen < 1: runlen = 1
-        op = ''
-        if typ == LHP or typ == INS:   # each move is an insertion
-            for i in range(runlen):
-                op += 'I'
-            row -= runlen
-        elif typ == SHP or typ == DEL: # each move is a deletion
-            for i in range(runlen):
-                op += 'D'
-            col -= runlen
-        elif typ == MAT: # only sub if stay in same matrix
-            i = 0
-            while i < runlen:
-                row -= 1
-                col -= 1
-                op += '=' if orig_ref[col] == seq[row] else 'X'
-                i += 1
-        else:
-            print("ERROR: unknown alignment matrix type:", typ)
-            break
-        aln += op
-
-    # debug print matrices
-    if verbosity >= 1:
+        # backtrack
         types = ['MAT', 'INS', 'LHP', 'DEL', 'SHP']
         ops = 'MILDS'
+        while row > inss[brk] or col > dels[brk]:
+            if row < inss[brk]:
+                print("\nERROR: row <", inss[brk], dels[brk], "@  A: (", row, 
+                        ",", col, "), B: (", b_pos0, ",", b_pos1, "),")
+                break
+            if col < dels[brk]:
+                print("\nERROR: col <", inss[brk], dels[brk], "@  A: (", row, 
+                        ",", col, "), B: (", b_pos0, ",", b_pos1, "),")
+                break
+            path.append((MAT, row, col))
+            b_pos0 = a_to_b0(row, col, inss, dels, r) - brk
+            b_pos1 = a_to_b1(row, col, inss, dels, r)
+            val = matrix[MAT, b_pos0, b_pos1, VALUE]
+            typ = <int>(matrix[MAT, b_pos0, b_pos1, TYPE])
+            runlen = <int>(matrix[MAT, b_pos0, b_pos1, RUNLEN])
 
-        # PRINT A
-        for typ, name in enumerate(types):
-            print('\nA:', name)
-            s = '    -'
-            for base in ref:
-                s += '    ' + base
-            print(s)
+            # Invalid SHPs and LHPs are runlen 0. They should never be reached during 
+            # backtracking (due to high penalties), but leaving this here just-in-case
+            if runlen < 1: runlen = 1
 
-            for row in range(a_rows):
+            op = ''
+            if typ == LHP or typ == INS:   # each move is an insertion
+                for i in range(runlen):
+                    op += 'I'
+                row -= runlen
+            elif typ == SHP or typ == DEL: # each move is a deletion
+                for i in range(runlen):
+                    op += 'D'
+                col -= runlen
+            elif typ == MAT: # only sub if stay in same matrix
+                i = 0
+                while i < runlen:
+                    row -= 1
+                    col -= 1
+                    op += '=' if orig_ref[col] == seq[row] else 'X'
+                    i += 1
+            else:
+                print("ERROR: unknown alignment matrix type:", typ)
+                break
+            aln += op
 
-                if row == 0:
-                    s = '-'
-                else:
-                    s = seq[row-1]
+        full_aln += aln[::-1]
 
-                for col in range(a_cols):
-                    b_pos0 = a_to_b0(row, col, inss, dels, r)
-                    b_pos1 = a_to_b1(row, col, inss, dels, r)
-                    op = ops[<int>(matrix[typ, b_pos0, b_pos1, TYPE])]
-                    if (typ, row, col) in path:
-                        mark = '$'
-                    elif col == 0 or row == 0:
-                        mark = '*'
-                    elif b_pos1 == 0 or b_pos1 == 2*r:
-                        mark = '.'
-                    else:
-                        mark = ' '
-                    runlen = <int>(matrix[typ, b_pos0, b_pos1, RUNLEN])
-                    if runlen < 10:
-                        s += "  " + str(runlen) + op + mark
-                    else:
-                        s += " " + str(runlen) + op + mark
-                print(s)
-
-        # PRINT B
-            print('\nB:', name)
-
-            # print columns
-            s = ' '
-            for col in range(b_cols):
-                if col < 10:
-                    s = s + '    ' + str(col)
-                else:
-                    s = s + '   ' + str(col)
-            print(s)
-
-            for row in range(b_rows):
-
-                # align labels
-                if row < 10:
-                    s = str(row) + ' '
-                else:
-                    s = str(row)
-
-                for col in range(b_cols):
-                    a_row = b_to_a0(row, col, inss, dels, r)
-                    a_col = b_to_a1(row, col, inss, dels, r)
-                    op = ops[<int>(matrix[typ, row, col, TYPE])]
-                    if (typ, row, col) in path:
-                        mark = '$'
-                    elif a_row < 0 or a_col < 0 or a_row >= a_rows or a_col >= a_cols:
-                        mark = '~'
-                    elif a_col == 0 or a_row == 0:
-                        mark = '*'
-                    elif col == 0 or col == 2*r:
-                        mark = '.'
-                    else:
-                        mark = ' '
-                    runlen = <int>(matrix[typ, row, col, RUNLEN])
-                    if runlen < 10:
-                        s += "  " + str(runlen) + op + mark
-                    else:
-                        s += " " + str(runlen) + op + mark
-                print(s)
-            print(' ')
-
-
-    # we backtracked, so get forward alignment
-    return aln[::-1]
+    return full_aln
 
 
 
