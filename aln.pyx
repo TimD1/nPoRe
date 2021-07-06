@@ -279,7 +279,7 @@ cdef int[:] get_breaks(int chunk_size, int array_size):
 
 @cython.boundscheck(False)
 @cython.wraparound(False)
-cpdef align(char[::1] ref, char[::1] seq, char[::1] orig_ref, str cigar, 
+cpdef align(char[::1] ref, char[::1] seq, str cigar, 
         float[:,::1] sub_scores, float[:,::1] hp_scores, 
         float indel_start=5, float indel_extend=2, int max_b_rows = 100001,
         int r = 30):
@@ -289,6 +289,7 @@ cpdef align(char[::1] ref, char[::1] seq, char[::1] orig_ref, str cigar,
     cigar = expand_cigar(cigar)
     cigar = cigar.replace('X','DI').replace('=','DI') \
             .replace('M','DI').replace('S','')
+    cdef int indels_only = int(cfg.args.indels_only)
 
     # precompute offsets, breakpoints, and homopolymers
     cdef int[:] inss = get_inss(cigar)
@@ -540,7 +541,13 @@ cpdef align(char[::1] ref, char[::1] seq, char[::1] orig_ref, str cigar,
                 while i < run:
                     a_row -= 1
                     a_col -= 1
-                    op += '=' if orig_ref[a_col] == seq[a_row] else 'X'
+                    if indels_only: # will later convert X -> ID and = -> M
+                        if ref[a_col] == seq[a_row]:
+                            op += '='
+                        else:
+                            op += 'X'
+                    else:
+                        op += 'M'
                     i += 1
             else:
                 print("ERROR: unknown alignment matrix type:", typ)

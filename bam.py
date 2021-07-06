@@ -46,10 +46,10 @@ def realign_bam():
 
 def splice_subs_into_ref(read_data):
 
-    read_id, ref_name, start, stop, cigar, orig_ref, r, seq, hap = read_data
+    read_id, ref_name, start, stop, cigar, orig_ref, seq, hap = read_data
 
     ref = list(orig_ref)
-    if ref_name in  cfg.args.subs:
+    if ref_name in cfg.args.subs:
         for pos, base in cfg.args.subs[ref_name][hap]:
             if pos < start or pos >= stop:
                 continue
@@ -61,7 +61,7 @@ def splice_subs_into_ref(read_data):
         cfg.read_count.value += 1
         print(f"\r        {cfg.read_count.value} reads processed.", end='', flush=True)
 
-    return (read_id, ref_name, start, stop, cigar, orig_ref, ref, seq, hap)
+    return (read_id, ref_name, start, stop, cigar, ref, seq, hap)
    
 
 
@@ -100,7 +100,6 @@ def get_read_data():
             read.reference_start + read.reference_length,
             read.cigarstring,
             read.get_reference_sequence().upper(),
-            read.get_reference_sequence().upper(),
             read.query_alignment_sequence.upper(),
             int(read.get_tag('HP'))
         ))
@@ -114,20 +113,18 @@ def get_read_data():
 def realign_read(read_data):
 
     # unpack
-    read_id, ref_name, start, stop, cigar, orig_ref, ref, seq, hap = read_data
+    read_id, ref_name, start, stop, cigar, ref, seq, hap = read_data
 
     # convert strings to np character arrays for efficiency
     int_ref = np.zeros(len(ref), dtype=np.uint8)
-    int_orig_ref = np.zeros(len(orig_ref), dtype=np.uint8)
     for i in range(len(ref)): 
         int_ref[i] = cfg.bases[ref[i]]
-        int_orig_ref[i] = cfg.bases[orig_ref[i]]
     int_seq = np.zeros(len(seq), dtype=np.uint8)
     for i in range(len(seq)): 
         int_seq[i] = cfg.bases[seq[i]]
 
     # align
-    new_cigar = align(int_ref, int_seq, int_orig_ref, cigar, 
+    new_cigar = align(int_ref, int_seq, cigar, 
             cfg.args.sub_scores, cfg.args.hp_scores)
     new_cigar = collapse_cigar(new_cigar)
 

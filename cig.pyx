@@ -231,7 +231,7 @@ def push_inss_left(cigar, seq):
 
 
 def subs_to_indels(cigar):
-    return cigar.replace('X', 'DI')
+    return cigar.replace('X', 'DI').replace('=','M')
 
 
 
