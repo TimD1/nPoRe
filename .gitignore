@@ -6,3 +6,4 @@ stats/
 *.c
 build
 *.so
+*.html

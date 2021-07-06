@@ -18,7 +18,7 @@ time python3 realign.py \
     --vcf $VCF \
     --contig chr19 \
     --contig_beg 1 \
-    --contig_end 100000 \
+    --contig_end 58592616 \
     --splice_subs \
     --indels_only \
     realigned.bam
