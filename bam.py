@@ -51,8 +51,10 @@ def splice_subs_into_ref(read_data):
     ref = list(orig_ref)
     if ref_name in cfg.args.subs:
         for pos, base in cfg.args.subs[ref_name][hap]:
-            if pos < start or pos >= stop:
+            if pos < start:
                 continue
+            if pos >= stop:
+                break
             else:
                 ref[pos-start] = base
     ref = ''.join(ref)

@@ -67,4 +67,15 @@ def get_vcf_data():
                         if gt == 2:
                             vcf_dict[snp.contig][hap_idx].append((snp.start, snp.alleles[2][0]))
         print(f'\r        {i+1} of {n} SNPs processed.', end='', flush=True)
+
+    # warn user if VCF is unphased. I've fallen for this twice now
+    unphased = True
+    for contig in vcf_dict:
+        if vcf_dict[contig][0] != vcf_dict[contig][1]:
+            unphased = False
+    if unphased:
+        print(f"WARNING: VCF file '{cfg.args.vcf}' may be unphased.\n" + \
+               "As a result, SNP splicing will not be correct."
+                )
+
     return vcf_dict

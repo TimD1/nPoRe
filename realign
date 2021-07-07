@@ -2,11 +2,9 @@
 
 DIR="/x/gm24385/chr19"
 BC="guppy_4_0_11"
-# BAM="$DIR/$BC/deep_variant/intermediate_files/MARGIN_PHASED.PEPPER_SNP_MARGIN.haplotagged.bam"
 BAM="$DIR/$BC/margin/output.haplotagged.bam"
 REF="$DIR/ref/GCA_000001405.15_GRCh38_no_alt_analysis_set.fasta"
-# VCF="$DIR/$BC/deep_variant/deepvariant.phased.vcf.gz"
-VCF="$DIR/$BC/pepper_snp/PEPPER_SNP_OUTPUT.vcf.gz"
+VCF="$DIR/$BC/margin_hp/output.phased.vcf.gz"
 
 # run Cython build
 python3 setup.py build_ext --inplace
