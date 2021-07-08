@@ -124,7 +124,7 @@ def push_dels_left(cigar, ref):
             nshifts = 0
             while ref_del_ptr-nshifts > 0 and \
                     ref[ref_del_ptr-nshifts-1] == ref[ref_del_ptr-nshifts-1 + shift_len] and \
-                    cigar[cig_del_ptr-nshifts-1] == '=':
+                    (cigar[cig_del_ptr-nshifts-1] == '=' or cigar[cig_del_ptr-nshifts-1] == 'M') :
                 nshifts += 1
                 diff = True
             
@@ -171,52 +171,47 @@ def push_inss_left(cigar, seq):
         op = cigar[cig_ptr]
         if op == 'I':
             ins_len = 1
-            while cig_ptr+ins_len < len(cigar) and \
-                    cigar[cig_ptr+ins_len] == 'I':
+            while cig_ptr + ins_len < len(cigar) and \
+                    cigar[cig_ptr + ins_len] == 'I':
                 ins_len += 1
         else:
             ins_len = 0
 
-        # iterate, pushing shorter prefixes of insertions left
+        # iterate, pushing shorter prefixes of insertion left
         shift_len = ins_len
         seq_ins_ptr = seq_ptr
         cig_ins_ptr = cig_ptr
 
         # while not at CIGAR start and we still have insertions to push
-        while cig_ins_ptr > shift_len and shift_len > 0:
+        while cig_ins_ptr > 0 and shift_len > 0:
 
             # push insertion as far left as possible (keeping seq same)
             nshifts = 0
-            while seq_ins_ptr - nshifts*shift_len >= 0 and \
-                    seq[seq_ins_ptr - nshifts*shift_len : seq_ins_ptr - (nshifts-1)*shift_len] == \
-                    seq[seq_ins_ptr : seq_ins_ptr + shift_len] and \
-                    'D' not in cigar[cig_ins_ptr - nshifts*shift_len : \
-                            cig_ins_ptr - (nshifts-1)*shift_len] and \
-                    'I' not in cigar[cig_ins_ptr - nshifts*shift_len : \
-                            cig_ins_ptr - (nshifts-1)*shift_len]:
+            while seq_ins_ptr-nshifts > 0 and \
+                    seq[seq_ins_ptr-nshifts-1] == seq[seq_ins_ptr-nshifts-1 + shift_len] and \
+                    (cigar[cig_ins_ptr-nshifts-1] == '=' or cigar[cig_ins_ptr-nshifts-1] == 'M') :
                 nshifts += 1
                 diff = True
             
             # update CIGAR, try shorter prefix
-            if diff:
-                # print(cigar)
-                cigar = (
-                        cigar[ : cig_ins_ptr-nshifts*shift_len] + # prefix
-                        cigar[cig_ins_ptr : cig_ins_ptr+shift_len] + # inss (shifted left)
-                        cigar[cig_ins_ptr-nshifts*shift_len : cig_ins_ptr] + # equals (shifted right)
-                        cigar[cig_ins_ptr+shift_len : ] # suffix
-                )
+            # print(cigar)
+            cigar = (
+                    cigar[                      : cig_ins_ptr-nshifts] +   # prefix
+                    cigar[cig_ins_ptr           : cig_ins_ptr+shift_len] + # inss (shifted left)
+                    cigar[cig_ins_ptr-nshifts   : cig_ins_ptr] +           # equals (shifted right)
+                    cigar[cig_ins_ptr+shift_len : ]                        # suffix
+            )
 
-                # print(' '*(cig_ptr) + '| cig_ptr')
-                # print(' '*(cig_ins_ptr) + '| cig_ins_ptr')
-                # print(cigar, f'{ins_len}I total, {shift_len}I shifted back {nshifts}')
-                # print(' '*(seq_ptr) + '| seq_ptr')
-                # print(' '*(seq_ins_ptr) + '| seq_ins_ptr')
-                # print(seq)
-                # print(' ')
+            # print(' '*(cig_ptr) + '| cig_ptr')
+            # print(' '*(cig_ins_ptr) + '| cig_ins_ptr')
+            # print(cigar, f'{ins_len}I total, {shift_len}I shifted back {nshifts}')
+            # print(' '*(seq_ptr) + '| seq_ptr')
+            # print(' '*(seq_ins_ptr) + '| seq_ins_ptr')
+            # print(seq)
+            # print(' ')
 
-            cig_ins_ptr -= nshifts*shift_len
-            seq_ins_ptr -= nshifts*shift_len
+            cig_ins_ptr -= nshifts
+            seq_ins_ptr -= nshifts
             shift_len -= 1
 
         # update pointers
@@ -289,13 +284,9 @@ def standardize_cigar(read_data):
 
     diff = True
     while diff: # loop until CIGAR is stable
-
         cigar1, diff1 = push_dels_left(cigar0, ref)
-
         cigar2, diff2 = push_inss_left(cigar1, seq)
-
         cigar3, diff3 = push_inss_thru_dels(cigar2)
-
         diff = diff1 or diff2 or diff3
         cigar0 = cigar3
 

@@ -571,7 +571,7 @@ def dump(ref, seq, cigar):
     seq_idx = 0
 
     for idx, op in enumerate(cigar):
-        if op == '=':
+        if op == '=' or op == 'M':
             ref_str += ref[ref_idx]
             ref_idx += 1
             seq_str += seq[seq_idx]
