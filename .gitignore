@@ -7,3 +7,4 @@ stats/
 build
 *.so
 *.html
+venv*
