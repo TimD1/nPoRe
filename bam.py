@@ -95,20 +95,23 @@ def get_read_data():
     # convert BAM to workable mp format: [(id, ctg, pos, cigar, ref, seq)...]
     read_data = []
     rds = 0
+    kept = 0
     print(f'\r        0 of {nreads} reads processed.', end='', flush=True)
     for read in reads:
-        read_data.append((
-            read.query_name,
-            read.reference_name,
-            read.reference_start,
-            read.reference_start + read.reference_length,
-            read.cigarstring,
-            read.get_reference_sequence().upper(),
-            read.query_alignment_sequence.upper(),
-            0 if not read.has_tag('HP') else int(read.get_tag('HP'))
-        ))
+        if not read.is_secondary and not read.is_unmapped:
+            read_data.append((
+                read.query_name,
+                read.reference_name,
+                read.reference_start,
+                read.reference_start + read.reference_length,
+                read.cigarstring,
+                read.get_reference_sequence().upper(),
+                read.query_alignment_sequence.upper(),
+                0 if not read.has_tag('HP') else int(read.get_tag('HP'))
+            ))
+            kept += 1
         rds += 1
-        print(f'\r        {rds} of {nreads} reads processed.', end='', flush=True)
+        print(f'\r        {rds} of {nreads} reads processed, {kept} primary reads kept.', end='', flush=True)
 
     return read_data
 
