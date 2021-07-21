@@ -1,4 +1,5 @@
 import multiprocessing as mp
+from collections import defaultdict
 
 # globals (for multi-processing without passing args)
 args = None
@@ -9,7 +10,17 @@ read_count = mp.Value('i', 0)
 results_count = mp.Value('i', 0)
 
 # global enum for bases ACGT
-bases = {'N': 0, 'A': 1, 'C': 2, 'G': 3, 'T': 4}
+bases = ['N', 'A', 'C', 'G', 'T']
+nbases = len(bases)
+base_dict = defaultdict(int)
+base_dict['A'] = 1
+base_dict['C'] = 2
+base_dict['G'] = 3
+base_dict['T'] = 4
+base_dict['a'] = 1
+base_dict['c'] = 2
+base_dict['g'] = 3
+base_dict['t'] = 4
 
 # convert Cigar to string
 cigar = 'MIDNSHP=XB'

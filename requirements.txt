@@ -1,2 +1,4 @@
 pysam
 cython
+matplotlib
+scipy

@@ -26,9 +26,9 @@ def argparser():
     parser.add_argument("--min_snp_qual", type=int, default=0)
 
     # region of interest
-    parser.add_argument("--contig", type=str, default="")
-    parser.add_argument("--contig_beg", type=int, default=0)
-    parser.add_argument("--contig_end", type=int, default=55000000)
+    parser.add_argument("--contig", type=str, default="chr19")
+    parser.add_argument("--contig_beg", type=int, default=1)
+    parser.add_argument("--contig_end", type=int, default=58592616)
 
     # algorithm parameters
     parser.add_argument("--max_hp", type=int, default=100)

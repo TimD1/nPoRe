@@ -32,6 +32,7 @@ def realign_bam():
     print('\n    > computing read realignments')
     with cfg.read_count.get_lock(): cfg.read_count.value = 0
     with mp.Pool() as pool:
+        print(f"\r        0 reads realigned.", end='', flush=True)
         read_data = pool.map(realign_read, read_data)
 
     # standardize CIGAR format, replace subs with indels
@@ -42,6 +43,7 @@ def realign_bam():
             read_data = pool.map(standardize_cigar, read_data)
 
     return read_data
+
 
 
 def splice_subs_into_ref(read_data):
@@ -103,7 +105,7 @@ def get_read_data():
             read.cigarstring,
             read.get_reference_sequence().upper(),
             read.query_alignment_sequence.upper(),
-            int(read.get_tag('HP'))
+            0 if not read.has_tag('HP') else int(read.get_tag('HP'))
         ))
         rds += 1
         print(f'\r        {rds} of {nreads} reads processed.', end='', flush=True)
@@ -120,10 +122,10 @@ def realign_read(read_data):
     # convert strings to np character arrays for efficiency
     int_ref = np.zeros(len(ref), dtype=np.uint8)
     for i in range(len(ref)): 
-        int_ref[i] = cfg.bases[ref[i]]
+        int_ref[i] = cfg.base_dict[ref[i]]
     int_seq = np.zeros(len(seq), dtype=np.uint8)
     for i in range(len(seq)): 
-        int_seq[i] = cfg.bases[seq[i]]
+        int_seq[i] = cfg.base_dict[seq[i]]
 
     # align
     new_cigar = align(int_ref, int_seq, cigar, 
@@ -252,7 +254,7 @@ def plot_confusion_matrices(subs, hps):
     # plot homopolymer confusion matrices
     fig, ax = plt.subplots(2, 2, figsize=(30,30))
     cmaps = [plt.cm.Reds, plt.cm.Blues, plt.cm.Oranges, plt.cm.Greens]
-    for base, idx in cfg.bases.items():
+    for base, idx in enumerate(cfg.bases):
         x_idx, y_idx = idx % 2, idx // 2
         frac_matrix = hps[idx] / (1 + hps[idx].sum(axis=1))[:,np.newaxis]
         ax[x_idx, y_idx].matshow(frac_matrix, cmap=cmaps[idx], alpha=0.5)
@@ -275,9 +277,9 @@ def plot_confusion_matrices(subs, hps):
     # plot substitution confusion matrix
     fig, ax = plt.subplots(figsize=(5,5))
     ax.matshow(subs, cmap=plt.cm.Greys, alpha=0.5)
-    for i in range(len(cfg.bases)):
+    for i in range(cfg.nbases):
         total = np.sum(subs[i])
-        for j in range(len(cfg.bases)):
+        for j in range(cfg.nbases):
             count = int(subs[i,j])
             frac = (count + 0.1 + int(i==j)*10) / (total + 10 + cfg.args.max_hp/10)
             ax.text(x=j, y=i, 
@@ -285,10 +287,10 @@ def plot_confusion_matrices(subs, hps):
                     va='center', ha='center')
     plt.xlabel('Predicted')
     plt.ylabel('Actual')
-    ax.set_xticks(range(len(cfg.bases)))
-    ax.set_xticklabels(list(cfg.bases.keys()))
-    ax.set_yticks(range(len(cfg.bases)))
-    ax.set_yticklabels(list(cfg.bases.keys()))
+    ax.set_xticks(range(cfg.nbases))
+    ax.set_xticklabels(cfg.bases)
+    ax.set_yticks(range(cfg.nbases))
+    ax.set_yticklabels(cfg.bases)
     plt.title(f'Substitutions CM')
     plt.tight_layout()
     plt.savefig(f'{cfg.args.stats_dir}/subs.png', dpi=300)
@@ -300,8 +302,8 @@ def calc_confusion_matrices(range_tuple):
     ''' Measure basecaller SUB/INDEL error profile. '''
 
     # initialize results matrices
-    subs = np.zeros((len(cfg.bases), len(cfg.bases)))
-    hps = np.zeros((len(cfg.bases), cfg.args.max_hp, cfg.args.max_hp))
+    subs = np.zeros((cfg.nbases, cfg.nbases))
+    hps = np.zeros((cfg.nbases, cfg.args.max_hp, cfg.args.max_hp))
 
     # check that BAM exists, initialize
     try:

@@ -94,10 +94,10 @@ def calc_score_matrices(subs, hps):
     hp_scores = fix_matrix_properties(hp_scores)
 
     # calculate substitution scores matrix
-    sub_scores = np.zeros((len(cfg.bases),len(cfg.bases)), dtype=np.float32)
-    for i in range(1, len(cfg.bases)):
+    sub_scores = np.zeros((cfg.nbases,cfg.nbases), dtype=np.float32)
+    for i in range(1, cfg.nbases):
         total = np.sum(subs[i-1])
-        for j in range(1, len(cfg.bases)):
+        for j in range(1, cfg.nbases):
             if i != j:
                 sub_scores[i, j] = -np.log( (subs[i-1,j-1]+0.1) / total )
             else:
@@ -288,7 +288,7 @@ cpdef align(char[::1] ref, char[::1] seq, str cigar,
     # convert CIGAR so that each movement is row+1 or col+1, enables easy banding
     cigar = expand_cigar(cigar)
     cigar = cigar.replace('X','DI').replace('=','DI') \
-            .replace('M','DI').replace('S','')
+            .replace('M','DI').replace('S','').replace('H','')
     cdef int indels_only = int(cfg.args.indels_only)
 
     # precompute offsets, breakpoints, and homopolymers
