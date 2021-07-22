@@ -98,13 +98,13 @@ def get_read_data():
     kept = 0
     print(f'\r        0 of {nreads} reads processed.', end='', flush=True)
     for read in reads:
-        if not read.is_secondary and not read.is_unmapped:
+        if not read.is_secondary and not read.is_supplementary and not read.is_unmapped:
             read_data.append((
                 read.query_name,
                 read.reference_name,
                 read.reference_start,
                 read.reference_start + read.reference_length,
-                read.cigarstring,
+                collapse_cigar(expand_cigar(read.cigarstring).replace('S','').replace('H','')),
                 read.get_reference_sequence().upper(),
                 read.query_alignment_sequence.upper(),
                 0 if not read.has_tag('HP') else int(read.get_tag('HP'))
@@ -131,8 +131,10 @@ def realign_read(read_data):
         int_seq[i] = cfg.base_dict[seq[i]]
 
     # align
-    new_cigar = align(int_ref, int_seq, cigar, 
-            cfg.args.sub_scores, cfg.args.hp_scores)
+    new_cigar = align(int_ref, int_seq, cigar, cfg.args.sub_scores, cfg.args.hp_scores)
+    # print(  f'aln read:{read_id:8s}'
+    #         f'\tseq:{len(seq)} {seq_len(expand_cigar(cigar))}->{seq_len(new_cigar)}'
+    #         f'\tref:{len(ref)} {ref_len(expand_cigar(cigar))}->{ref_len(new_cigar)}')
     new_cigar = collapse_cigar(new_cigar)
 
     with cfg.read_count.get_lock():
@@ -174,8 +176,13 @@ def write_results(alignments, outfile):
             try:
                 aln_itr = bam_index.find(read_id)
                 old_alignment = next(aln_itr)
+                while   old_alignment.is_secondary or \
+                        old_alignment.is_supplementary or \
+                        old_alignment.is_unmapped:
+                    old_alignment = next(aln_itr)
+
             except (KeyError, StopIteration) as e:
-                print(f"ERROR: could not find read {read_id} in BAM file '{cfg.args.bam}'.")
+                print(f"ERROR: could not find primary read {read_id} in BAM file '{cfg.args.bam}'.")
                 exit(1)
 
             # overwrite CIGAR string

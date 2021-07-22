@@ -94,8 +94,8 @@ def extend_pysam_cigar(ops, counts):
 
 
 
-# @cython.boundscheck(False)
-# @cython.wraparound(False)
+@cython.boundscheck(False)
+@cython.wraparound(False)
 cdef push_indels_left(char[::1] cigar, char[::1] seq, char push_op):
     ''' Push CIGAR indels leftwards. '''
     cdef char M = 0
@@ -189,8 +189,8 @@ def subs_to_indels(cigar):
 
 
 
-# @cython.boundscheck(False)
-# @cython.wraparound(False)
+@cython.boundscheck(False)
+@cython.wraparound(False)
 cdef push_inss_thru_dels(char[::1] cigar):
     ''' Enable CIGAR insertions to be pushed leftward through deletions. '''
     cdef char I = 1
@@ -277,6 +277,10 @@ cpdef standardize_cigar(read_data):
         diff = diff1 + diff2 + diff3 # logical OR (if any changed)
 
     final_cigar = collapse_cigar(int_to_cig(int_cig))
+
+    # print(f'cig read:{read_id:>8}'
+    #     f'\tseq:{len(seq)} {seq_len(cigar)}->{seq_len(expand_cigar(final_cigar))}'
+    #     f'\tref:{len(ref)} {ref_len(cigar)}->{ref_len(expand_cigar(final_cigar))}')
 
     with cfg.read_count.get_lock():
         cfg.read_count.value += 1
