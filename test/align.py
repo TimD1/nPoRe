@@ -39,10 +39,10 @@ def main():
 
         int_ref = np.zeros(len(ref), dtype=np.uint8)
         for i in range(len(ref)): 
-            int_ref[i] = cfg.bases[ref[i]]
+            int_ref[i] = cfg.base_dict[ref[i]]
         int_seq = np.zeros(len(seq), dtype=np.uint8)
         for i in range(len(seq)): 
-            int_seq[i] = cfg.bases[seq[i]]
+            int_seq[i] = cfg.base_dict[seq[i]]
 
         # new_cigar = align(int_ref, int_seq, cigar, sub_scores, hp_scores, r=4)
         # print(f"Cigar: {expand_cigar(cigar)}")

@@ -23,6 +23,10 @@ base_dict['g'] = 3
 base_dict['t'] = 4
 
 # convert Cigar to string
-cigar = 'MIDNSHP=XB'
+cigars = 'MIDNSHP=XB'
+cigar_dict = {
+    'M': 0, 'I': 1, 'D': 2, 'N': 3, 'S': 4,
+    'H': 5, 'P': 6, 'E': 7, 'X': 8, 'B': 9
+}
 
 __version__ = "0.0.1"
