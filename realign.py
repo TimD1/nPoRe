@@ -21,10 +21,6 @@ def argparser():
     parser.add_argument("ref")
     parser.add_argument("out")
 
-    # vcf only necessary if applying SUBs
-    parser.add_argument("--vcf")
-    parser.add_argument("--min_snp_qual", type=int, default=0)
-
     # region of interest
     parser.add_argument("--contig", type=str, default="chr19")
     parser.add_argument("--contig_beg", type=int, default=1)
@@ -40,7 +36,8 @@ def argparser():
     # boolean options
     parser.add_argument("--plot", action="store_true")
     parser.add_argument("--recalc_cms", action="store_true")
-    parser.add_argument("--splice_subs", action="store_true")
+    parser.add_argument("--apply_vcf")
+    parser.add_argument("--min_snp_qual", type=int, default=0)
     parser.add_argument("--indels_only", action="store_true")
 
     return parser

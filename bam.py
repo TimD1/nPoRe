@@ -20,7 +20,7 @@ def realign_bam():
     read_data = get_read_data()
 
     # update 'ref' based on SUB variant calls (optional)
-    if cfg.args.splice_subs:
+    if cfg.args.apply_vcf:
         print('\n    > parsing VCF')
         cfg.args.subs = get_vcf_data()
         with cfg.read_count.get_lock(): cfg.read_count.value = 0
@@ -35,12 +35,11 @@ def realign_bam():
         print(f"\r        0 reads realigned.", end='', flush=True)
         read_data = pool.map(realign_read, read_data)
 
-    # standardize CIGAR format, replace subs with indels
-    if cfg.args.indels_only:
-        with cfg.read_count.get_lock(): cfg.read_count.value = 0
-        print('\n    > converting to standard INDEL format')
-        with mp.Pool() as pool:
-            read_data = pool.map(standardize_cigar, read_data)
+    # standardize CIGAR format, replace subs with indels/matches
+    with cfg.read_count.get_lock(): cfg.read_count.value = 0
+    print('\n    > converting to standard INDEL format')
+    with mp.Pool() as pool:
+        read_data = pool.map(standardize_cigar, read_data)
 
     return read_data
 

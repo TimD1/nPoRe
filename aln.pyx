@@ -289,7 +289,6 @@ cpdef align(char[::1] ref, char[::1] seq, str cigar,
     cigar = expand_cigar(cigar)
     cigar = cigar.replace('X','DI').replace('=','DI') \
             .replace('M','DI').replace('S','').replace('H','')
-    cdef int indels_only = int(cfg.args.indels_only)
 
     # precompute offsets, breakpoints, and homopolymers
     cdef int[:] inss = get_inss(cigar)
@@ -541,13 +540,10 @@ cpdef align(char[::1] ref, char[::1] seq, str cigar,
                 while i < run:
                     a_row -= 1
                     a_col -= 1
-                    if indels_only: # will later convert X -> ID and = -> M
-                        if ref[a_col] == seq[a_row]:
-                            op += '='
-                        else:
-                            op += 'X'
+                    if ref[a_col] == seq[a_row]:
+                        op += '='
                     else:
-                        op += 'M'
+                        op += 'X'
                     i += 1
             else:
                 print("ERROR: unknown alignment matrix type:", typ)

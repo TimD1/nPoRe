@@ -184,11 +184,6 @@ cdef push_indels_left(char[::1] cigar, char[::1] seq, char push_op):
 
 
 
-def subs_to_indels(cigar):
-    return cigar.replace('X', 'DI').replace('=','M')
-
-
-
 @cython.boundscheck(False)
 @cython.wraparound(False)
 cdef push_inss_thru_dels(char[::1] cigar):
@@ -263,7 +258,12 @@ cpdef standardize_cigar(read_data):
 
     read_id, ref_name, start, cigar, ref, seq = read_data
     cigar = expand_cigar(cigar)
-    cigar = subs_to_indels(cigar)
+
+    # can optionally only report INDELs, assume substitutions found already
+    if cfg.args.indels_only:
+        cigar = cigar.replace('X', 'DI').replace('=','M')
+    else: 
+        cigar = cigar.replace('X', 'M').replace('=','M')
 
     cdef char[::1] int_cig = cig_to_int(cigar)
     cdef char[::1] int_ref = bases_to_int(ref)
@@ -276,7 +276,7 @@ cpdef standardize_cigar(read_data):
         int_cig, diff3 = push_inss_thru_dels(int_cig)
         diff = diff1 + diff2 + diff3 # logical OR (if any changed)
 
-    final_cigar = collapse_cigar(int_to_cig(int_cig))
+    final_cigar = collapse_cigar(int_to_cig(int_cig).replace('ID','M'))
 
     # print(f'cig read:{read_id:>8}'
     #     f'\tseq:{len(seq)} {seq_len(cigar)}->{seq_len(expand_cigar(final_cigar))}'

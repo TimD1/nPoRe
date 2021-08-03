@@ -14,7 +14,7 @@ def get_vcf_data():
     '''
 
     # count snps
-    vcf_file = pysam.VariantFile(cfg.args.vcf, 'r')
+    vcf_file = pysam.VariantFile(cfg.args.apply_vcf, 'r')
     snps = None
     if cfg.args.contig:
         snps = vcf_file.fetch(
@@ -74,7 +74,7 @@ def get_vcf_data():
         if vcf_dict[contig][0] != vcf_dict[contig][1]:
             unphased = False
     if unphased:
-        print(f"WARNING: VCF file '{cfg.args.vcf}' may be unphased.\n" + \
+        print(f"WARNING: VCF file '{cfg.args.apply_vcf}' may be unphased.\n" + \
                "As a result, SNP splicing will not be correct."
                 )
 
