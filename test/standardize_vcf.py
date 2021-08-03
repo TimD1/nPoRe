@@ -22,8 +22,23 @@ def main():
     subprocess.run(['tabix', '-p', 'vcf', vcf1])
     subprocess.run(['tabix', '-p', 'vcf', vcf2])
 
-    print(f"> merging vcfs: '{vcf1}' and '{vcf2}'")
-    merge_vcfs(vcf1, vcf2)
+    print(f"> applying '{vcf1}'")
+    seq1, cig1 = apply_vcf(vcf1, cfg.args.ref)
+    print(f"> applying '{vcf2}'")
+    seq2, cig2 = apply_vcf(vcf2, cfg.args.ref)
+
+    print(f"> reading reference")
+    ref = get_fasta(cfg.args.ref, cfg.args.contig)
+
+    print(f"> standardizing cigar1")
+    cigar1_data = standardize_cigar(("hap1", "chr19", 0, cig1, ref, seq1))
+    print(f"\n> standardizing cigar2")
+    cigar2_data = standardize_cigar(("hap2", "chr19", 0, cig2, ref, seq2))
+
+    print('\n'
+
+    # print(f"> merging vcfs: '{vcf1}' and '{vcf2}'")
+    # merge_vcfs(vcf1, vcf2)
 
 
 
@@ -33,9 +48,11 @@ def argparser():
             add_help = False
     )
     parser.add_argument("--vcf", type=str, default='/x/gm24385/chr19/guppy_4_0_11/clair3_ra/pileup.vcf.gz')
+    parser.add_argument("--ref", type=str, default='/x/gm24385/chr19/ref/GCA_000001405.15_GRCh38_no_alt_analysis_set.fasta')
     parser.add_argument("--contig", type=str, default="chr19")
     parser.add_argument("--contig_beg", type=int, default=1)
     parser.add_argument("--contig_end", type=int, default=40_000_000)
+    parser.add_argument("--indels_only", default=True, action="store_true")
     return parser
 
 

@@ -240,6 +240,44 @@ def get_fasta(reference, contig):
 
 def apply_vcf(vcf_fn, ref_fn):
 
+    ref = get_fasta(ref_fn, cfg.args.contig)
+    vcf = pysam.VariantFile(vcf_fn, 'r')
+
+    cig = ''
+    seq = ''
+    last_pos = 0
+    for record in vcf.fetch(
+            cfg.args.contig, cfg.args.contig_beg, cfg.args.contig_end):
+        pos = record.pos - 1
+
+        # all positions not in VCF are unchanged
+        seq += ref[last_pos:pos]
+        cig += '=' * (pos - last_pos)
+        last_pos = pos
+
+        # compare current position for sub/ins/del
+        seq += record.alleles[1]
+        if record.alleles[0][0] == record.alleles[1][0]:
+            cig += '='
+            last_pos += 1
+        else:
+            cig += 'X'
+            last_pos += 1
+
+        indel_len = len(record.alleles[1]) - len(record.alleles[0])
+        if indel_len > 0:   # insertion
+            cig += 'I' * indel_len
+
+        elif indel_len < 0:   # deletion
+            indel_len = abs(indel_len)
+            cig += 'D' * indel_len
+            last_pos += indel_len
+
+    return seq, cig
+
+
+
+
 
 
 def gen_vcf():
