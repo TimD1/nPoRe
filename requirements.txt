@@ -2,3 +2,4 @@ pysam
 cython
 matplotlib
 scipy
+biopython

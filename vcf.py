@@ -1,6 +1,7 @@
 import pysam
 from collections import defaultdict
 import os
+from Bio import SeqIO
 
 import cfg
 
@@ -231,8 +232,15 @@ def merge_vcfs(vcf_fn1, vcf_fn2, out_fn=None):
         if hap2: record2 = next(vcf2_itr, None)
 
 
-def apply_vcf():
-    pass
+
+def get_fasta(reference, contig):
+    return str(SeqIO.to_dict(SeqIO.parse(reference, "fasta"))[contig].seq[:])
+
+
+
+def apply_vcf(vcf_fn, ref_fn):
+
+
 
 def gen_vcf():
     pass
