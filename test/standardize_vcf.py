@@ -1,4 +1,4 @@
-import os, sys
+import os, sys, subprocess
 import argparse
 import numpy as np
 
@@ -16,7 +16,14 @@ import cfg as cfg
 def main():
 
     print(f"> splitting vcf '{cfg.args.vcf}'")
-    split_vcf(cfg.args.vcf, 'out/vcf')
+    vcf1, vcf2 = split_vcf(cfg.args.vcf, 'out/vcf')
+
+    print(f"> indexing '{vcf1}' and '{vcf2}'")
+    subprocess.run(['tabix', '-p', 'vcf', vcf1])
+    subprocess.run(['tabix', '-p', 'vcf', vcf2])
+
+    print(f"> merging vcfs: '{vcf1}' and '{vcf2}'")
+    merge_vcfs(vcf1, vcf2)
 
 
 

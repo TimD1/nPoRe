@@ -1,5 +1,6 @@
 import pysam
 from collections import defaultdict
+import os
 
 import cfg
 
@@ -113,12 +114,36 @@ def split_vcf(vcf_fn, vcf_out_pre=None):
         for sample in record.samples:
             gt = record.samples[sample]['GT']
             break
-        assert(len(gt) == 2)
 
-        if gt[0]: # hap1 variant
-            vcf_out1.write(record.copy())
-        if gt[1]: # hap2 variant
-            vcf_out2.write(record.copy())
+        # TODO: with complex vars, can shorten alleles
+        if len(record.alleles) == 3:  # different variants
+            record1 = record.copy()
+            for sample in record1.samples:
+                record1.samples[sample]['GT'] = ()
+            alleles1 = [record.alleles[0], record.alleles[gt[0]]]
+            record1.alleles = alleles1
+            vcf_out1.write(record1)
+
+            record2 = record.copy()
+            for sample in record2.samples:
+                record2.samples[sample]['GT'] = ()
+            alleles2 = [record.alleles[0], record.alleles[gt[1]]]
+            record2.alleles = alleles2
+            vcf_out2.write(record2)
+            continue
+
+        if gt[0]:                    # hap1 variant
+            record1 = record.copy()
+            for sample in record1.samples:
+                record1.samples[sample]['GT'] = ()
+            vcf_out1.write(record1)
+
+        if gt[1]:                    # hap2 variant
+            record2 = record.copy()
+            for sample in record2.samples:
+                record2.samples[sample]['GT'] = ()
+            vcf_out2.write(record2)
+
         if gt[0] and not gt[1]: # 1|0 means phased, otherwise all are 0|1
             unphased = False
 
@@ -129,10 +154,82 @@ def split_vcf(vcf_fn, vcf_out_pre=None):
 
 
 
-def merge_vcf(vcf_fn1, vcf_fn2, out_fn=None):
+def merge_vcfs(vcf_fn1, vcf_fn2, out_fn=None):
+
+    # create iterators for both input VCFs
+    vcf1 = pysam.VariantFile(vcf_fn1, 'r')
+    vcf2 = pysam.VariantFile(vcf_fn2, 'r')
+    vcf1_itr = iter(vcf1.fetch(cfg.args.contig, 
+                cfg.args.contig_beg, cfg.args.contig_end))
+    vcf2_itr = iter(vcf2.fetch(cfg.args.contig, 
+                cfg.args.contig_beg, cfg.args.contig_end))
+    record1 = next(vcf1_itr, None)
+    record2 = next(vcf2_itr, None)
+
+    # create output VCF
     if out_fn is None:
-        out_fn = vcf_fn1[:-5] # remove '_hapN'
-    pass
+        prefix1 = vcf_fn1.split(os.extsep)[0]
+        prefix2 = vcf_fn2.split(os.extsep)[0]
+        if prefix1[-1] == '1' and prefix2[-1] == '2' and \
+                prefix1[:-1] == prefix2[:-1]:
+            out_fn = prefix1[:-1] + '.vcf.gz'
+        else:
+            out_fn = 'out.vcf.gz'
+    vcf_out = pysam.VariantFile(out_fn, 'w', header=vcf1.header)
+
+    # step through both input VCFs
+    while record1 or record2:
+        pos1 = float('inf') if not record1 else record1.pos
+        pos2 = float('inf') if not record2 else record2.pos
+        pos = min(pos1, pos2)
+        hap1 = pos1 == pos
+        hap2 = pos2 == pos
+
+        # merge variants, tracking genotypes
+        if hap1 and hap2:
+            if record1.alleles == record2.alleles: # same 1|1
+                record = record1.copy()
+                for sample in record.samples:
+                    record.samples[sample]['GT'] = (1,1)
+                vcf_out.write(record)
+
+            else:                                        # diff 1|2
+                record = record1.copy()
+                reflen_diff = len(record1.alleles[0]) - len(record2.alleles[0])
+                if reflen_diff > 0: # hap1 longer del
+                    record.alleles = (
+                            record1.alleles[0], 
+                            record1.alleles[1], 
+                            record2.alleles[1] + record1.alleles[0] \
+                                [len(record2.alleles[0]):len(record1.alleles[0])])
+                else:               # same, hap2 longer del
+                    reflen_diff = abs(reflen_diff)
+                    record.alleles = (
+                            record1.alleles[0], 
+                            record1.alleles[1] + record2.alleles[0]\
+                                [len(record1.alleles[0]):len(record2.alleles[0])], 
+                            record2.alleles[1])
+
+                for sample in record.samples:
+                    record.samples[sample]['GT'] = (1,2)
+                vcf_out.write(record)
+
+        elif hap1:                                       # 1|0
+            record = record1.copy()
+            for sample in record.samples:
+                record.samples[sample]['GT'] = (1,0)
+            vcf_out.write(record)
+
+        elif hap2:                                       # 0|1
+            record = record2.copy()
+            for sample in record.samples:
+                record.samples[sample]['GT'] = (0,1)
+            vcf_out.write(record)
+
+        # continue
+        if hap1: record1 = next(vcf1_itr, None)
+        if hap2: record2 = next(vcf2_itr, None)
+
 
 def apply_vcf():
     pass
