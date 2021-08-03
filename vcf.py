@@ -79,3 +79,64 @@ def get_vcf_data():
                 )
 
     return vcf_dict
+
+
+def split_vcf(vcf_fn, vcf_out_pre=None):
+    '''
+    Splits phased VCF into hapVCFs.
+    '''
+
+    # open VCF
+    vcf_file = pysam.VariantFile(vcf_fn, 'r')
+    snps = None
+    if cfg.args.contig:
+        vcf = vcf_file.fetch(
+                    cfg.args.contig, 
+                    cfg.args.contig_beg, 
+                    cfg.args.contig_end)
+    else:
+        vcf = vcf_file.fetch()
+
+    # create output VCFs
+    if vcf_out_pre is None:
+        vcf_out_pre = vcf_fn + "_hap"
+    vcf_out1_fn = vcf_out_pre + "1.vcf.gz"
+    vcf_out2_fn = vcf_out_pre + "2.vcf.gz"
+    vcf_out1 = pysam.VariantFile(vcf_out1_fn, 'w', header=vcf_file.header)
+    vcf_out2 = pysam.VariantFile(vcf_out2_fn, 'w', header=vcf_file.header)
+
+    # read diploid VCF, copying records into hap1 or hap2 VCF
+    unphased = True
+    for record in vcf:
+
+        # only deal with 1-sample VCFs for now
+        for sample in record.samples:
+            gt = record.samples[sample]['GT']
+            break
+        assert(len(gt) == 2)
+
+        if gt[0]: # hap1 variant
+            vcf_out1.write(record.copy())
+        if gt[1]: # hap2 variant
+            vcf_out2.write(record.copy())
+        if gt[0] and not gt[1]: # 1|0 means phased, otherwise all are 0|1
+            unphased = False
+
+    if unphased:
+        print(f"WARNING: VCF file '{cfg.args.vcf}' may be unphased.")
+
+    return vcf_out1_fn, vcf_out2_fn
+
+
+
+def merge_vcf(vcf_fn1, vcf_fn2, out_fn=None):
+    if out_fn is None:
+        out_fn = vcf_fn1[:-5] # remove '_hapN'
+    pass
+
+def apply_vcf():
+    pass
+
+def gen_vcf():
+    pass
+

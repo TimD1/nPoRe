@@ -8,3 +8,4 @@ build
 *.so
 *.html
 venv*
+test/out*
