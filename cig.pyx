@@ -10,7 +10,7 @@ import pysam, cython
 import cfg
 
 
-def collapse_cigar(extended_cigar):
+def collapse_cigar(extended_cigar, return_groups=False):
     ''' 
     Converts extended CIGAR ops list to normal CIGAR string. 
     'DMMMII' -> '1D3M2I'
@@ -28,6 +28,9 @@ def collapse_cigar(extended_cigar):
 
     if last:
         groups.append((count, last))
+
+    if return_groups:
+        return groups
 
     out = ''
     for num, op in groups:
