@@ -58,12 +58,12 @@ def main():
     cigar1_data = pickle.load(open('out/cigar1_data.pkl', 'rb'))
     cigar2_data = pickle.load(open('out/cigar2_data.pkl', 'rb'))
 
-    print(f"> aligned haps to BAM")
+    print(f"> aligning haps to ref")
     hap_to_bam(cigar1_data, "out/hap")
     hap_to_bam(cigar2_data, "out/hap")
 
     print('> generating VCF1')
-    prefix = f"{args.vcf.split(os.extsep)[0]}_std"
+    prefix = f"{'.'.join(cfg.args.vcf.split(os.extsep)[:-2])}_std"
     vcf1 = gen_vcf(cigar1_data, prefix)
     print('> generating VCF2')
     vcf2 = gen_vcf(cigar2_data, prefix)

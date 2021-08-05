@@ -168,8 +168,8 @@ def merge_vcfs(vcf_fn1, vcf_fn2, out_fn=None):
 
     # create output VCF
     if out_fn is None:
-        prefix1 = vcf_fn1.split(os.extsep)[0]
-        prefix2 = vcf_fn2.split(os.extsep)[0]
+        prefix1 = '.'.join(vcf_fn1.split(os.extsep)[:-2])
+        prefix2 = '.'.join(vcf_fn2.split(os.extsep)[:-2])
         if prefix1[-1] == '1' and prefix2[-1] == '2' and \
                 prefix1[:-1] == prefix2[:-1]:
             out_fn = prefix1[:-1] + '.vcf.gz'
