@@ -84,7 +84,7 @@ def get_vcf_data():
     return vcf_dict
 
 
-def split_vcf(vcf_fn, vcf_out_pre=None):
+def split_vcf(vcf_fn, vcf_out_pre=''):
     '''
     Splits phased VCF into hapVCFs.
     '''
@@ -101,8 +101,6 @@ def split_vcf(vcf_fn, vcf_out_pre=None):
         vcf = vcf_file.fetch()
 
     # create output VCFs
-    if vcf_out_pre is None:
-        vcf_out_pre = vcf_fn + "_hap"
     vcf_out1_fn = vcf_out_pre + "1.vcf.gz"
     vcf_out2_fn = vcf_out_pre + "2.vcf.gz"
     vcf_out1 = pysam.VariantFile(vcf_out1_fn, 'w', header=vcf_file.header)
@@ -246,31 +244,30 @@ def apply_vcf(vcf_fn, ref_fn):
 
     cig = ''
     seq = ''
-    last_pos = 0
+    ref_ptr = 0
     vcf = pysam.VariantFile(vcf_fn, 'r')
     for record in vcf.fetch(
             cfg.args.contig, cfg.args.contig_beg, cfg.args.contig_end):
         pos = record.pos - 1
 
-        adjacent = False
-        if pos < last_pos: # adjacent indels
-            adjacent = True
-        else: # no overlap, add unchanged positions
-            seq += ref[last_pos:pos]
-            cig += '=' * (pos - last_pos)
-            last_pos = pos
+        if pos < ref_ptr: # overlapping indels, ignore second
+            # print(f'skipping pos: {pos}, alleles: {record.alleles}')
+            continue
+        else:
+            seq += ref[ref_ptr:pos]
+            cig += '=' * (pos - ref_ptr)
+            ref_ptr += pos-ref_ptr
 
         # compare current position for sub/ins/del
-        if adjacent:
-            seq += record.alleles[1][1:]
-        else:
-            seq += record.alleles[1]
-            if record.alleles[0][0] == record.alleles[1][0]:
+        seq += record.alleles[1]
+        minlen = min(len(record.alleles[0]), len(record.alleles[1]))
+        for i in range(minlen):
+            if record.alleles[0][i] == record.alleles[1][i]:
                 cig += '='
-                last_pos += 1
+                ref_ptr += 1
             else:
                 cig += 'X'
-                last_pos += 1
+                ref_ptr += 1
 
         indel_len = len(record.alleles[1]) - len(record.alleles[0])
         if indel_len > 0:   # insertion
@@ -279,13 +276,15 @@ def apply_vcf(vcf_fn, ref_fn):
         elif indel_len < 0:   # deletion
             indel_len = abs(indel_len)
             cig += 'D' * indel_len
-            last_pos += indel_len
+            ref_ptr += indel_len
 
-        print(last_pos, ref_len(cig), alleles)
+        # print(f'pos: {pos}, len(seq): {len(seq)} seq_len(cig): {seq_len(cig)}, alleles: {record.alleles}')
+        # if seq_len(cig) != len(seq):
+        #     input()
 
     # add remaining (all matches)
-    cig += '=' * (len_ref - last_pos)
-    seq += ref[last_pos:]
+    cig += '=' * (len_ref - ref_ptr)
+    seq += ref[ref_ptr:]
 
     return seq, collapse_cigar(cig)
 

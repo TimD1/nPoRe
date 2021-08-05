@@ -3,3 +3,4 @@ cython
 matplotlib
 scipy
 biopython
+pickle
