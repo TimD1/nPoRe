@@ -296,8 +296,9 @@ cpdef standardize_cigar(read_data):
 def change_ref(read_cig, hap_cig, ref, read, hap):
 
     # initialize data and pointers
-    read_cig = expand_cigar(read_cig)
-    hap_cig = expand_cigar(hap_cig)
+    # star used to denote end of CIGAR, continue until both ends reached
+    read_cig = expand_cigar(read_cig.replace('=','M').replace('X','M')) + '*'
+    hap_cig = expand_cigar(hap_cig.replace('=','M').replace('X','M')) + '*'
     cig_ptr_read = 0
     cig_ptr_hap = 0
     ref_ptr_read = 0
@@ -307,55 +308,33 @@ def change_ref(read_cig, hap_cig, ref, read, hap):
     new_cig = ''
 
     # step through both CIGARs, updating read alignment
-    while cig_ptr_read < len(read_cig) and cig_ptr_hap < len(hap_cig):
+    while True:
 
         consume_read_cig, consume_hap_cig = False, False
 
-        # hap CIGAR '='
-        if hap_cig[cig_ptr_hap] == '=' and read_cig[cig_ptr_read] == '=':
-            new_cig += '='
-            consume_read_cig = True
-            consume_hap_cig = True
-        elif hap_cig[cig_ptr_hap] == '=' and read_cig[cig_ptr_read] == 'X':
-            new_cig += 'X'
-            consume_read_cig = True
-            consume_hap_cig = True
-        elif hap_cig[cig_ptr_hap] == '=' and read_cig[cig_ptr_read] == 'I':
-            new_cig += 'I'
-            consume_read_cig = True
-            consume_hap_cig = False
-        elif hap_cig[cig_ptr_hap] == '=' and read_cig[cig_ptr_read] == 'D':
-            new_cig += 'D'
-            consume_read_cig = True
-            consume_hap_cig = True
-
-        # hap CIGAR 'X'
-        if hap_cig[cig_ptr_hap] == 'X' and read_cig[cig_ptr_read] == '=':
-            new_cig += 'X'
-            consume_read_cig = True
-            consume_hap_cig = True
-        elif hap_cig[cig_ptr_hap] == 'X' and read_cig[cig_ptr_read] == 'X':
+        # hap CIGAR 'M'
+        if hap_cig[cig_ptr_hap] == 'M' and read_cig[cig_ptr_read] == 'M':
             if read[read_ptr] == hap[hap_ptr]:
                 new_cig += '='
             else:
                 new_cig += 'X'
             consume_read_cig = True
             consume_hap_cig = True
-        elif hap_cig[cig_ptr_hap] == 'X' and read_cig[cig_ptr_read] == 'I':
+        elif hap_cig[cig_ptr_hap] == 'M' and read_cig[cig_ptr_read] == 'I':
             new_cig += 'I'
             consume_read_cig = True
             consume_hap_cig = False
-        elif hap_cig[cig_ptr_hap] == 'X' and read_cig[cig_ptr_read] == 'D':
+        elif hap_cig[cig_ptr_hap] == 'M' and read_cig[cig_ptr_read] == 'D':
             new_cig += 'D'
             consume_read_cig = True
             consume_hap_cig = True
-
-        # hap CIGAR 'I'
-        if hap_cig[cig_ptr_hap] == 'I' and read_cig[cig_ptr_read] == '=':
+        elif hap_cig[cig_ptr_hap] == 'M' and read_cig[cig_ptr_read] == '*':
             new_cig += 'D'
             consume_read_cig = False
             consume_hap_cig = True
-        elif hap_cig[cig_ptr_hap] == 'I' and read_cig[cig_ptr_read] == 'X':
+
+        # hap CIGAR 'I'
+        elif hap_cig[cig_ptr_hap] == 'I' and read_cig[cig_ptr_read] == 'M':
             new_cig += 'D'
             consume_read_cig = False
             consume_hap_cig = True
@@ -370,13 +349,13 @@ def change_ref(read_cig, hap_cig, ref, read, hap):
             new_cig += 'D'
             consume_read_cig = False
             consume_hap_cig = True
+        elif hap_cig[cig_ptr_hap] == 'I' and read_cig[cig_ptr_read] == '*':
+            new_cig += 'D'
+            consume_read_cig = False
+            consume_hap_cig = True
 
         # hap CIGAR 'D'
-        if hap_cig[cig_ptr_hap] == 'D' and read_cig[cig_ptr_read] == '=':
-            new_cig += 'I'
-            consume_read_cig = True
-            consume_hap_cig = True
-        elif hap_cig[cig_ptr_hap] == 'D' and read_cig[cig_ptr_read] == 'X':
+        elif hap_cig[cig_ptr_hap] == 'D' and read_cig[cig_ptr_read] == 'M':
             new_cig += 'I'
             consume_read_cig = True
             consume_hap_cig = True
@@ -387,32 +366,51 @@ def change_ref(read_cig, hap_cig, ref, read, hap):
         elif hap_cig[cig_ptr_hap] == 'D' and read_cig[cig_ptr_read] == 'D':
             consume_read_cig = False
             consume_hap_cig = True
+        elif hap_cig[cig_ptr_hap] == 'D' and read_cig[cig_ptr_read] == '*':
+            consume_read_cig = False
+            consume_hap_cig = True
+
+        # hap CIGAR '*'
+        elif hap_cig[cig_ptr_hap] == '*' and read_cig[cig_ptr_read] == 'M':
+            new_cig += 'I'
+            consume_read_cig = True
+            consume_hap_cig = False
+        elif hap_cig[cig_ptr_hap] == '*' and read_cig[cig_ptr_read] == 'I':
+            new_cig += 'I'
+            consume_read_cig = True
+            consume_hap_cig = False
+        elif hap_cig[cig_ptr_hap] == '*' and read_cig[cig_ptr_read] == 'D':
+            consume_read_cig = False
+            consume_hap_cig = False
+        elif hap_cig[cig_ptr_hap] == '*' and read_cig[cig_ptr_read] == '*':
+            return new_cig
 
         # update all pointers (based on consumed CIGAR operations)
         if consume_read_cig: 
-            if read_cig[cig_ptr_read] == '=':
-                ref_ptr_read += 1
-                read_ptr += 1
-            elif read_cig[cig_ptr_read] == 'X':
+            elif read_cig[cig_ptr_read] == 'M':
                 ref_ptr_read += 1
                 read_ptr += 1
             elif read_cig[cig_ptr_read] == 'I':
                 read_ptr += 1
             elif read_cig[cig_ptr_read] == 'D':
                 ref_ptr_read += 1
+            elif read_cig[cig_ptr_read] == '*':
+                print('ERROR: * cannot be consumed!')
+                exit(1)
             cig_ptr_read += 1
         if consume_hap_cig: 
-            if hap_cig[cig_ptr_hap] == '=':
-                ref_ptr_hap += 1
-                hap_ptr += 1
-            elif hap_cig[cig_ptr_hap] == 'X':
+            elif hap_cig[cig_ptr_hap] == 'M':
                 ref_ptr_hap += 1
                 hap_ptr += 1
             elif hap_cig[cig_ptr_hap] == 'I':
                 hap_ptr += 1
             elif hap_cig[cig_ptr_hap] == 'D':
                 ref_ptr_hap += 1
+            elif hap_cig[cig_ptr_hap] == '*':
+                print('ERROR: * cannot be consumed!')
+                exit(1)
             cig_ptr_hap += 1
+
 
 
 def flip_cigar_basis(cigar):
