@@ -208,6 +208,42 @@ def write_results(alignments, outfile):
 
 
 
+def hap_to_bam(hap_data, bam_fn_pre=''):
+
+    hap_id, contig, start, cigar, ref, seq = hap_data
+    bam_fn = f'{bam_fn_pre}{hap_id}.bam'
+
+    # generate header
+    header = { 'HD': {
+                   'VN': '1.6', 
+                   'SO': 'coordinate'
+               },
+               'SQ': [{'LN': len(ref), 'SN': contig}],
+               'PG': [{
+                   'PN': 'realigner',
+                   'ID': 'realigner',
+                   'VN': cfg.__version__,
+                   'CL': ' '.join(sys.argv)
+               }]
+             }
+
+    # write aligned haplotype
+    with pysam.Samfile(bam_fn, 'wb', header=header) as fh:
+        new_alignment = pysam.AlignedSegment()
+        new_alignment.query_name      = f"hap{hap_id}"
+        new_alignment.query_sequence  = seq
+        new_alignment.flag            = 0
+        new_alignment.reference_start = start
+        new_alignment.mapping_quality = 60
+        new_alignment.query_qualities = pysam.qualitystring_to_array('X'*len(seq))
+        new_alignment.tags            = [('HP', hap_id)]
+        new_alignment.reference_id    = 0
+        new_alignment.cigarstring     = cigar
+        fh.write(new_alignment)
+    print(f"    wrote '{bam_fn}'")
+
+
+
 def get_ranges(start, stop):
     ''' Split (start, stop) into `n` even chunks. '''
     starts = list(range(start, stop, cfg.args.chunk_width))
