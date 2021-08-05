@@ -3,6 +3,7 @@ from collections import defaultdict
 import os
 from Bio import SeqIO
 
+from cig import *
 import cfg
 
 def get_vcf_data():
@@ -241,28 +242,35 @@ def get_fasta(reference, contig):
 def apply_vcf(vcf_fn, ref_fn):
 
     ref = get_fasta(ref_fn, cfg.args.contig)
-    vcf = pysam.VariantFile(vcf_fn, 'r')
+    len_ref = len(ref)
 
     cig = ''
     seq = ''
     last_pos = 0
+    vcf = pysam.VariantFile(vcf_fn, 'r')
     for record in vcf.fetch(
             cfg.args.contig, cfg.args.contig_beg, cfg.args.contig_end):
         pos = record.pos - 1
 
-        # all positions not in VCF are unchanged
-        seq += ref[last_pos:pos]
-        cig += '=' * (pos - last_pos)
-        last_pos = pos
+        adjacent = False
+        if pos < last_pos: # adjacent indels
+            adjacent = True
+        else: # no overlap, add unchanged positions
+            seq += ref[last_pos:pos]
+            cig += '=' * (pos - last_pos)
+            last_pos = pos
 
         # compare current position for sub/ins/del
-        seq += record.alleles[1]
-        if record.alleles[0][0] == record.alleles[1][0]:
-            cig += '='
-            last_pos += 1
+        if adjacent:
+            seq += record.alleles[1][1:]
         else:
-            cig += 'X'
-            last_pos += 1
+            seq += record.alleles[1]
+            if record.alleles[0][0] == record.alleles[1][0]:
+                cig += '='
+                last_pos += 1
+            else:
+                cig += 'X'
+                last_pos += 1
 
         indel_len = len(record.alleles[1]) - len(record.alleles[0])
         if indel_len > 0:   # insertion
@@ -273,13 +281,96 @@ def apply_vcf(vcf_fn, ref_fn):
             cig += 'D' * indel_len
             last_pos += indel_len
 
-    return seq, cig
+        print(last_pos, ref_len(cig), alleles)
+
+    # add remaining (all matches)
+    cig += '=' * (len_ref - last_pos)
+    seq += ref[last_pos:]
+
+    return seq, collapse_cigar(cig)
 
 
 
+def gen_vcf(read_data, vcf_out_pre = ''):
 
+    hap_id, ctg_name, start, cigar, ref, seq = read_data
+    cigar = expand_cigar(cigar)
 
+    # create VCF header
+    vcf_header = pysam.VariantHeader()
+    vcf_header.add_sample('SAMPLE')
+    vcf_header.add_meta('contig', 
+            items=[('ID', ctg_name)])
+    vcf_header.add_meta('contig_length', 
+            items=[('ID', len(ref))])
+    vcf_header.add_meta('FORMAT', 
+            items=[('ID',"GT"), ('Number',1), ('Type','String'), 
+                ('Description','Genotype')])
+    vcf_header.add_meta('FORMAT', 
+            items=[('ID',"GQ"), ('Number',1), ('Type','Integer'), 
+                ('Description','Genotype quality score')])
 
-def gen_vcf():
-    pass
+    # create VCF file
+    vcf_out_fn = f"{vcf_out_pre}{hap_id}.vcf.gz"
+    vcf_out = pysam.VariantFile(vcf_out_fn, 'w', header=vcf_header)
 
+    # convert CIGAR to VCF
+    ref_ptr = start
+    seq_ptr = 0
+    cig_ptr = 0
+    cig_len = len(cigar)
+    while cig_ptr < cig_len:
+
+        if cigar[cig_ptr] == 'M':
+            # match, don't add to VCF
+            if ref[ref_ptr] == seq[seq_ptr]:
+                ref_ptr += 1
+                seq_ptr += 1
+                cig_ptr += 1
+            else: # simple sub
+                record = vcf_out.header.new_record(
+                        contig = ctg_name,
+                        start = ref_ptr,
+                        alleles = (ref[ref_ptr], seq[seq_ptr]),
+                        qual = 10,
+                        filter = 'PASS'
+                )
+                vcf_out.write(record)
+                ref_ptr += 1
+                seq_ptr += 1
+                cig_ptr += 1
+
+        elif cigar[cig_ptr] == 'D':
+            del_len = 0
+            while cig_ptr < cig_len and cigar[cig_ptr] == 'D':
+                del_len += 1
+                cig_ptr += 1
+            record = vcf_out.header.new_record(
+                    contig = ctg_name,
+                    start = ref_ptr-1,
+                    alleles = (ref[ref_ptr-1:ref_ptr+del_len], ref[ref_ptr-1]),
+                    qual = 10,
+                    filter = 'PASS'
+            )
+            vcf_out.write(record)
+            ref_ptr += del_len
+
+        elif cigar[cig_ptr] == 'I':
+            ins_len = 0
+            while cig_ptr < cig_len and cigar[cig_ptr] == 'I':
+                ins_len += 1
+                cig_ptr += 1
+            record = vcf_out.header.new_record(
+                    contig = ctg_name,
+                    start = ref_ptr-1,
+                    alleles = (ref[ref_ptr-1], seq[seq_ptr-1:seq_ptr+ins_len]),
+                    qual = 10,
+                    filter = 'PASS'
+            )
+            vcf_out.write(record)
+            seq_ptr += ins_len
+        else:
+            print(f"ERROR: unrecognized CIGAR operation '{cigar[cig_ptr]}'")
+            exit(1)
+
+    return vcf_out_fn
