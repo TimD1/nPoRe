@@ -1,9 +1,9 @@
 import pysam
 from collections import defaultdict
 import os
-from Bio import SeqIO
 
 from cig import *
+from util import *
 import cfg
 
 def get_vcf_data():
@@ -232,14 +232,8 @@ def merge_vcfs(vcf_fn1, vcf_fn2, out_fn=None):
 
 
 
-def get_fasta(reference, contig):
-    return str(SeqIO.to_dict(SeqIO.parse(reference, "fasta"))[contig].seq[:])
+def apply_vcf(vcf_fn, ref):
 
-
-
-def apply_vcf(vcf_fn, ref_fn):
-
-    ref = get_fasta(ref_fn, cfg.args.contig)
     len_ref = len(ref)
 
     cig = ''
@@ -279,7 +273,7 @@ def apply_vcf(vcf_fn, ref_fn):
             ref_ptr += indel_len
 
         # print(f'pos: {pos}, len(seq): {len(seq)} seq_len(cig): {seq_len(cig)}, alleles: {record.alleles}')
-        # if seq_len(cig) != len(seq):
+        # if seq_len(cig) != len(seq) or ref_len(cig) != len_ref:
         #     input()
 
     # add remaining (all matches)
@@ -292,7 +286,7 @@ def apply_vcf(vcf_fn, ref_fn):
 
 def gen_vcf(read_data, vcf_out_pre = ''):
 
-    hap_id, ctg_name, start, cigar, ref, seq = read_data
+    hap_id, ctg_name, start, stop, cigar, hap_cigar, ref, hap_ref, seq, hap = read_data
     cigar = expand_cigar(cigar)
 
     # create VCF header

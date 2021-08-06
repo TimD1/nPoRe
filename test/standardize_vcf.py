@@ -31,36 +31,36 @@ def fix_vcf(vcf):
 
 def main():
 
-    print(f"> splitting vcf '{cfg.args.vcf}'")
-    vcf1, vcf2 = split_vcf(cfg.args.vcf, "out/hap")
+    # print(f"> splitting vcf '{cfg.args.vcf}'")
+    # vcf1, vcf2 = split_vcf(cfg.args.vcf, "out/hap")
 
-    print(f"> indexing '{vcf1}' and '{vcf2}'")
-    subprocess.run(['tabix', '-p', 'vcf', vcf1])
-    subprocess.run(['tabix', '-p', 'vcf', vcf2])
+    # print(f"> indexing '{vcf1}' and '{vcf2}'")
+    # subprocess.run(['tabix', '-p', 'vcf', vcf1])
+    # subprocess.run(['tabix', '-p', 'vcf', vcf2])
 
-    print(f"> applying '{vcf1}'")
-    seq1, cig1 = apply_vcf(vcf1, cfg.args.ref)
-    print(f"> applying '{vcf2}'")
-    seq2, cig2 = apply_vcf(vcf2, cfg.args.ref)
+    # print(f"> reading reference")
+    # ref = get_fasta(cfg.args.ref, cfg.args.contig)
 
-    print(f"> reading reference")
-    ref = get_fasta(cfg.args.ref, cfg.args.contig)
+    # print(f"> applying '{vcf1}'")
+    # seq1, cig1 = apply_vcf(vcf1, ref)
+    # print(f"> applying '{vcf2}'")
+    # seq2, cig2 = apply_vcf(vcf2, ref)
 
-    print(f"> standardizing cigars")
-    cigar1_data = standardize_cigar(("1", "chr19", 0, cig1, ref, seq1))
-    cigar2_data = standardize_cigar(("2", "chr19", 0, cig2, ref, seq2))
+    # print(f"> standardizing cigars")
+    # cigar1_data = standardize_cigar(("1", "chr19", 0, 0, cig1, "", ref, "", seq1, 1))
+    # cigar2_data = standardize_cigar(("2", "chr19", 0, 0, cig2, "", ref, "",  seq2, 2))
 
-    print(f"\n> saving CIGAR data")
-    pickle.dump(cigar1_data, open('out/cigar1_data.pkl', 'wb'))
-    pickle.dump(cigar2_data, open('out/cigar2_data.pkl', 'wb'))
+    # print(f"\n> saving CIGAR data")
+    # pickle.dump(cigar1_data, open('out/cigar1_data.pkl', 'wb'))
+    # pickle.dump(cigar2_data, open('out/cigar2_data.pkl', 'wb'))
 
     print(f"> loading CIGAR data")
     cigar1_data = pickle.load(open('out/cigar1_data.pkl', 'rb'))
     cigar2_data = pickle.load(open('out/cigar2_data.pkl', 'rb'))
 
-    print(f"> aligning haps to ref")
-    hap_to_bam(cigar1_data, "out/hap")
-    hap_to_bam(cigar2_data, "out/hap")
+    # print(f"> aligning haps to ref")
+    # hap_to_bam(cigar1_data, "out/hap")
+    # hap_to_bam(cigar2_data, "out/hap")
 
     print('> generating VCF1')
     prefix = f"{'.'.join(cfg.args.vcf.split(os.extsep)[:-2])}_std"
@@ -73,7 +73,9 @@ def main():
     fix_vcf(vcf2)
 
     print(f"> merging vcfs: '{vcf1}' and '{vcf2}'")
-    merge_vcfs(vcf1, vcf2)
+    out_fn = f"{prefix}.vcf.gz"
+    merge_vcfs(vcf1, vcf2, out_fn)
+    subprocess.run(['tabix', '-p', 'vcf', out_fn])
 
 
 
@@ -88,7 +90,7 @@ def argparser():
             default='/x/gm24385/chr19/ref/GCA_000001405.15_GRCh38_no_alt_analysis_set.fasta')
     parser.add_argument("--contig", type=str, default="chr19")
     parser.add_argument("--contig_beg", type=int, default=1)
-    parser.add_argument("--contig_end", type=int, default=40_000_000)
+    parser.add_argument("--contig_end", type=int, default=58_592_616)
     parser.add_argument("--indels_only", default=True, action="store_true")
     return parser
 

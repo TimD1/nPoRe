@@ -1,5 +1,6 @@
 import multiprocessing as mp
 import os, re, itertools, sys
+from bisect import bisect_left, bisect_right
 
 import pysam
 import numpy as np
@@ -9,6 +10,7 @@ import cfg
 from aln import *
 from cig import *
 from vcf import *
+from util import *
 
 def realign_bam():
     '''
@@ -21,12 +23,41 @@ def realign_bam():
 
     # update 'ref' based on SUB variant calls (optional)
     if cfg.args.apply_vcf:
-        print('\n    > parsing VCF')
-        cfg.args.subs = get_vcf_data()
+
+        print(f"    > splitting vcf '{cfg.args.vcf}'")
+        vcf1, vcf2 = split_vcf(cfg.args.vcf, f"{cfg.args.out}/hap")
+
+        print(f"    > indexing '{vcf1}' and\n        '{vcf2}'")
+        subprocess.run(['tabix', '-p', 'vcf', vcf1])
+        subprocess.run(['tabix', '-p', 'vcf', vcf2])
+
+        print(f"    > reading reference: '{cfg.args.ref}'")
+        cfg.args.reference = get_fasta(cfg.args.ref, cfg.args.contig)
+
+        print(f"    > applying '{vcf1}' to reference")
+        cfg.args.hap1, cfg.args.hap1_cig = apply_vcf(vcf1, cfg.args.reference)
+        print(f"    > applying '{vcf2}' to reference")
+        cfg.args.hap2, cfg.args.hap2_cig = apply_vcf(vcf2, cfg.args.reference)
+
+        print(f"    > standardizing haplotype cigars")
+        _, _, _, _, _, cfg.args.hap1_cig, _, _, _, _ = \
+                standardize_cigar(("1", "chr19", 0, 0, "", cfg.args.hap1_cig, 
+                    cfg.args.reference, "", cfg.args.hap1, 2))
+        _, _, _, _, _, cfg.args.hap2_cig, _, _, _, _ = \
+                standardize_cigar(("2", "chr19", 0, 0, "", cfg.args.hap2_cig, 
+                    cfg.args.reference, "", cfg.args.hap2, 2))
+
+        print(f"    > precomputing haplotype positions")
+        cfg.args.ref_poss_hap1, cfg.args.hap1_poss = \
+                get_refseq_positions(cfg.args.hap1_cig)
+        cfg.args.ref_poss_hap2, cfg.args.hap2_poss = \
+                get_refseq_positions(cfg.args.hap2_cig)
+
         with cfg.read_count.get_lock(): cfg.read_count.value = 0
-        print('\n    > splicing subs into reference')
+        print('\n    > adding haplotype data to reads')
         with mp.Pool() as pool:
-            read_data = pool.map(splice_subs_into_ref, read_data)
+            read_data = list(filter(None, pool.map(add_haplotype_data, read_data)))
+            read_data = pool.map(to_haplotype_ref, read_data)
 
     # align 'seq' to 'ref', update 'cigar'
     print('\n    > computing read realignments')
@@ -41,30 +72,70 @@ def realign_bam():
     with mp.Pool() as pool:
         read_data = pool.map(standardize_cigar, read_data)
 
+    # convert read alignment back to original reference
+    with mp.Pool() as pool:
+        read_data = pool.map(from_haplotype_ref, read_data)
+
     return read_data
 
 
 
-def splice_subs_into_ref(read_data):
+def to_haplotype_ref(read_data):
+    read_id, ref_name, start, stop, cigar, hap_cigar, ref, hap_ref, seq, hap = read_data
+    new_cigar = change_ref(cigar, hap_cigar, ref, seq, hap)
+    return (read_id, ref_name, start, stop, new_cigar, hap_cigar, ref, hap_ref, seq, hap)
 
-    read_id, ref_name, start, stop, cigar, orig_ref, seq, hap = read_data
+def from_haplotype_ref(read_data):
+    read_id, ref_name, start, stop, cigar, hap_cigar, ref, hap_ref, seq, hap = read_data
+    ref_cigar = flip_cigar_basis(hap_cigar)
+    new_cigar = change_ref(cigar, ref_cigar, hap, seq, ref)
+    return (read_id, ref_name, start, stop, new_cigar, hap_cigar, ref, hap_ref, seq, hap)
 
-    ref = list(orig_ref)
-    if ref_name in cfg.args.subs:
-        for pos, base in cfg.args.subs[ref_name][hap]:
-            if pos < start:
-                continue
-            if pos >= stop:
-                break
-            else:
-                ref[pos-start] = base
-    ref = ''.join(ref)
 
-    with cfg.read_count.get_lock():
-        cfg.read_count.value += 1
-        print(f"\r        {cfg.read_count.value} reads processed.", end='', flush=True)
 
-    return (read_id, ref_name, start, stop, cigar, ref, seq, hap)
+def add_haplotype_data(read_data):
+
+    read_id, ref_name, start, stop, read_cigar, ref, read_seq, hap = read_data
+
+    if hap == 1:
+        cigar_start = bisect_left(cfg.args.ref_poss_hap1, start)
+        cigar_stop = bisect_right(cfg.args.ref_poss_hap1, stop)
+        hap1_start = cfg.args.hap1_poss[cigar_start]
+        hap1_stop = cfg.args.hap1_poss[cigar_stop]
+        hap1_ref = cfg.args.hap1[hap1_start:hap1_stop]
+        hap1_cigar = collapse_cigar(
+                expand_cigar(cfg.args.hap1_cig)[cigar_start:cigar_stop])
+
+        with cfg.read_count.get_lock():
+            cfg.read_count.value += 1
+            print(f"\r        {cfg.read_count.value} reads processed.", end='', flush=True)
+
+        # NOTE: start/stop still in terms of original ref
+        return (read_id, ref_name, start, stop, read_cigar, 
+                hap1_cigar, ref, hap1_ref, read_seq, hap)
+
+    elif hap == 2:
+        cigar_start = bisect_left(cfg.args.ref_poss_hap2, start)
+        cigar_stop = bisect_right(cfg.args.ref_poss_hap2, stop)
+        hap2_start = cfg.args.hap2_poss[cigar_start]
+        hap2_stop = cfg.args.hap2_poss[cigar_stop]
+        hap2_ref = cfg.args.hap2[hap2_start:hap2_stop]
+        hap2_cigar = collapse_cigar(
+                expand_cigar(cfg.args.hap2_cig)[cigar_start:cigar_stop])
+
+        with cfg.read_count.get_lock():
+            cfg.read_count.value += 1
+            print(f"\r        {cfg.read_count.value} reads processed.", end='', flush=True)
+
+        # NOTE: start/stop still in terms of original ref
+        return (read_id, ref_name, start, stop, read_cigar, 
+                hap2_cigar, ref, hap2_ref, read_seq, hap)
+
+    else:
+        with cfg.read_count.get_lock():
+            cfg.read_count.value += 1
+            print(f"\r        {cfg.read_count.value} reads processed.", end='', flush=True)
+        return None
    
 
 
@@ -119,7 +190,7 @@ def get_read_data():
 def realign_read(read_data):
 
     # unpack
-    read_id, ref_name, start, stop, cigar, ref, seq, hap = read_data
+    read_id, ref_name, start, stop, cigar, hap_cigar, ref, hap_ref, seq, hap = read_data
 
     # convert strings to np character arrays for efficiency
     int_ref = np.zeros(len(ref), dtype=np.uint8)
@@ -140,7 +211,7 @@ def realign_read(read_data):
         cfg.read_count.value += 1
         print(f"\r        {cfg.read_count.value} reads realigned.", end='', flush=True)
 
-    return (read_id, ref_name, start, new_cigar, ref, seq)
+    return (read_id, ref_name, start, stop, new_cigar, hap_cigar, ref, hap_ref, seq, hap)
 
 
     
@@ -210,7 +281,7 @@ def write_results(alignments, outfile):
 
 def hap_to_bam(hap_data, bam_fn_pre=''):
 
-    hap_id, contig, start, cigar, ref, seq = hap_data
+    hap_id, contig, start, stop, cigar, hap_cigar, ref, hap_ref, seq, hap = hap_data
     bam_fn = f'{bam_fn_pre}{hap_id}.bam'
 
     # generate header

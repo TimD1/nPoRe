@@ -259,7 +259,7 @@ cpdef standardize_cigar(read_data):
     cdef char I = 1
     cdef char D = 2
 
-    read_id, ref_name, start, cigar, ref, seq = read_data
+    read_id, ref_name, start, stop, cigar, hap_cigar, ref, hap_ref, seq, hap = read_data
     cigar = expand_cigar(cigar)
 
     # can optionally only report INDELs, assume substitutions found already
@@ -279,17 +279,33 @@ cpdef standardize_cigar(read_data):
         int_cig, diff3 = push_inss_thru_dels(int_cig)
         diff = diff1 + diff2 + diff3 # logical OR (if any changed)
 
-    final_cigar = collapse_cigar(int_to_cig(int_cig).replace('ID','M'))
+    new_cigar = collapse_cigar(int_to_cig(int_cig).replace('ID','M'))
 
     # print(f'cig read:{read_id:>8}'
-    #     f'\tseq:{len(seq)} {seq_len(cigar)}->{seq_len(expand_cigar(final_cigar))}'
-    #     f'\tref:{len(ref)} {ref_len(cigar)}->{ref_len(expand_cigar(final_cigar))}')
+    #     f'\tseq:{len(seq)} {seq_len(cigar)}->{seq_len(expand_cigar(new_cigar))}'
+    #     f'\tref:{len(ref)} {ref_len(cigar)}->{ref_len(expand_cigar(new_cigar))}')
 
     with cfg.read_count.get_lock():
         cfg.read_count.value += 1
         print(f"\r        {cfg.read_count.value} CIGARs standardized.", end='', flush=True)
 
-    return (read_id, ref_name, start, final_cigar, ref, seq)
+    return (read_id, ref_name, start, stop, new_cigar, hap_cigar, ref, hap_ref, seq, hap)
+
+
+
+def get_refseq_positions(cigar):
+    ref_poss = np.zeros(len(cigar))
+    seq_poss = np.zeros(len(cigar))
+    reflen = 0
+    seqlen = 0
+    for i, op in enumerate(cigar):
+        if op in 'SXI=M':
+            seqlen += 1
+        if op in 'XD=M':
+            reflen += 1
+        seq_poss[i] = seqlen
+        ref_poss[i] = reflen
+    return ref_poss, seq_poss
 
 
 
@@ -387,7 +403,7 @@ def change_ref(read_cig, hap_cig, ref, read, hap):
 
         # update all pointers (based on consumed CIGAR operations)
         if consume_read_cig: 
-            elif read_cig[cig_ptr_read] == 'M':
+            if read_cig[cig_ptr_read] == 'M':
                 ref_ptr_read += 1
                 read_ptr += 1
             elif read_cig[cig_ptr_read] == 'I':
@@ -399,7 +415,7 @@ def change_ref(read_cig, hap_cig, ref, read, hap):
                 exit(1)
             cig_ptr_read += 1
         if consume_hap_cig: 
-            elif hap_cig[cig_ptr_hap] == 'M':
+            if hap_cig[cig_ptr_hap] == 'M':
                 ref_ptr_hap += 1
                 hap_ptr += 1
             elif hap_cig[cig_ptr_hap] == 'I':
