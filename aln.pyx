@@ -286,7 +286,6 @@ cpdef align(char[::1] ref, char[::1] seq, str cigar,
     ''' Perform alignment.  '''
 
     # convert CIGAR so that each movement is row+1 or col+1, enables easy banding
-    cigar = expand_cigar(cigar)
     cigar = cigar.replace('X','DI').replace('=','DI') \
             .replace('M','DI').replace('S','').replace('H','')
 

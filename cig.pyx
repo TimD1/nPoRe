@@ -260,7 +260,6 @@ cpdef standardize_cigar(read_data):
     cdef char D = 2
 
     read_id, ref_name, start, stop, cigar, hap_cigar, ref, hap_ref, seq, hap = read_data
-    cigar = expand_cigar(cigar)
 
     # can optionally only report INDELs, assume substitutions found already
     if cfg.args.indels_only:
@@ -279,15 +278,15 @@ cpdef standardize_cigar(read_data):
         int_cig, diff3 = push_inss_thru_dels(int_cig)
         diff = diff1 + diff2 + diff3 # logical OR (if any changed)
 
-    new_cigar = collapse_cigar(int_to_cig(int_cig).replace('ID','M'))
+    new_cigar = int_to_cig(int_cig).replace('ID','M')
 
     # print(f'cig read:{read_id:>8}'
-    #     f'\tseq:{len(seq)} {seq_len(cigar)}->{seq_len(expand_cigar(new_cigar))}'
-    #     f'\tref:{len(ref)} {ref_len(cigar)}->{ref_len(expand_cigar(new_cigar))}')
+    #     f'\tseq:{len(seq)} {seq_len(cigar)}->{seq_len(new_cigar)}'
+    #     f'\tref:{len(ref)} {ref_len(cigar)}->{ref_len(new_cigar)}')
 
     with cfg.read_count.get_lock():
         cfg.read_count.value += 1
-        print(f"\r        {cfg.read_count.value} CIGARs standardized.", end='', flush=True)
+        print(f"\r    {cfg.read_count.value} CIGARs standardized.", end='', flush=True)
 
     return (read_id, ref_name, start, stop, new_cigar, hap_cigar, ref, hap_ref, seq, hap)
 
@@ -313,8 +312,8 @@ def change_ref(read_cig, hap_cig, ref, read, hap):
 
     # initialize data and pointers
     # star used to denote end of CIGAR, continue until both ends reached
-    read_cig = expand_cigar(read_cig.replace('=','M').replace('X','M')) + '*'
-    hap_cig = expand_cigar(hap_cig.replace('=','M').replace('X','M')) + '*'
+    read_cig = read_cig.replace('=','M').replace('X','M') + '*'
+    hap_cig = hap_cig.replace('=','M').replace('X','M') + '*'
     cig_ptr_read = 0
     cig_ptr_hap = 0
     ref_ptr_read = 0

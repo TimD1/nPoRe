@@ -38,7 +38,7 @@ def get_vcf_data():
         snps = vcf_file.fetch()
 
     vcf_dict = {}
-    print(f'\r        0 of {n} SNPs processed.', end='', flush=True)
+    print(f'\r    0 of {n} SNPs processed.', end='', flush=True)
     for i, snp in enumerate(snps):
         if snp.qual > cfg.args.min_snp_qual:
             gt = None
@@ -69,7 +69,7 @@ def get_vcf_data():
                     for hap_idx, gt in enumerate(gts):
                         if gt == 2:
                             vcf_dict[snp.contig][hap_idx].append((snp.start, snp.alleles[2][0]))
-        print(f'\r        {i+1} of {n} SNPs processed.', end='', flush=True)
+        print(f'\r    {i+1} of {n} SNPs processed.', end='', flush=True)
 
     # warn user if VCF is unphased. I've fallen for this twice now
     unphased = True
@@ -280,7 +280,7 @@ def apply_vcf(vcf_fn, ref):
     cig += '=' * (len_ref - ref_ptr)
     seq += ref[ref_ptr:]
 
-    return seq, collapse_cigar(cig)
+    return seq, cig
 
 
 
