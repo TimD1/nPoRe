@@ -21,6 +21,9 @@ def to_haplotype_ref(read_data):
     #         f'\tref:{len(ref)} {ref_len(cigar)} {ref_len(hap_cigar)}'
     #         f'\thap:{len(hap_ref)} {seq_len(hap_cigar)} -> {ref_len(new_cigar)}'
     # )
+    with cfg.read_count.get_lock():
+        cfg.read_count.value += 1
+        print(f"\r    {cfg.read_count.value} reads converted.", end='', flush=True)
     return (read_id, ref_name, start, stop, new_cigar, hap_cigar, ref, hap_ref, seq, hap)
 
 
@@ -34,6 +37,9 @@ def from_haplotype_ref(read_data):
     #         f'\tref:{len(ref)} {seq_len(ref_cigar)} {ref_len(hap_cigar)} -> {ref_len(new_cigar)}'
     #         f'\thap:{len(hap_ref)} {ref_len(cigar)} {seq_len(hap_cigar)} -> {ref_len(ref_cigar)}'
     # )
+    with cfg.read_count.get_lock():
+        cfg.read_count.value += 1
+        print(f"\r    {cfg.read_count.value} reads converted.", end='', flush=True)
     return (read_id, ref_name, start, stop, new_cigar, hap_cigar, ref, hap_ref, seq, hap)
 
 
