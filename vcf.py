@@ -148,7 +148,7 @@ def split_vcf(vcf_fn, vcf_out_pre=''):
             unphased = False
 
     if unphased:
-        print(f"WARNING: VCF file '{cfg.args.vcf}' may be unphased.")
+        print(f"WARNING: VCF file '{cfg.args.apply_vcf}' may be unphased.")
 
     return vcf_out1_fn, vcf_out2_fn
 

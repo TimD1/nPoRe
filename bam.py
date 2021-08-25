@@ -15,7 +15,12 @@ from util import *
 
 def to_haplotype_ref(read_data):
     read_id, ref_name, start, stop, cigar, hap_cigar, ref, hap_ref, seq, hap = read_data
-    new_cigar = change_ref(cigar, hap_cigar, ref, seq, hap)
+    new_cigar = change_ref(cigar, hap_cigar, ref, seq, hap_ref)
+    # print(  f'to hap - aln read:{read_id:8s}'
+    #         f'\tseq:{len(seq)} {seq_len(cigar)} -> {seq_len(new_cigar)}'
+    #         f'\tref:{len(ref)} {ref_len(cigar)} {ref_len(hap_cigar)}'
+    #         f'\thap:{len(hap_ref)} {seq_len(hap_cigar)} -> {ref_len(new_cigar)}'
+    # )
     return (read_id, ref_name, start, stop, new_cigar, hap_cigar, ref, hap_ref, seq, hap)
 
 
@@ -23,7 +28,12 @@ def to_haplotype_ref(read_data):
 def from_haplotype_ref(read_data):
     read_id, ref_name, start, stop, cigar, hap_cigar, ref, hap_ref, seq, hap = read_data
     ref_cigar = flip_cigar_basis(hap_cigar)
-    new_cigar = change_ref(cigar, ref_cigar, hap, seq, ref)
+    new_cigar = change_ref(cigar, ref_cigar, hap_ref, seq, ref)
+    # print(  f'from hap - aln read:{read_id:5s}'
+    #         f'\tseq:{len(seq)} {seq_len(cigar)} -> {seq_len(new_cigar)}'
+    #         f'\tref:{len(ref)} {seq_len(ref_cigar)} {ref_len(hap_cigar)} -> {ref_len(new_cigar)}'
+    #         f'\thap:{len(hap_ref)} {ref_len(cigar)} {seq_len(hap_cigar)} -> {ref_len(ref_cigar)}'
+    # )
     return (read_id, ref_name, start, stop, new_cigar, hap_cigar, ref, hap_ref, seq, hap)
 
 
@@ -37,9 +47,9 @@ def add_haplotype_data(read_data):
 
     if hap == 1:
         cigar_start = bisect_left(cfg.args.ref_poss_hap1, start)
-        cigar_stop = bisect_right(cfg.args.ref_poss_hap1, stop)
-        hap1_start = cfg.args.hap1_poss[cigar_start]
-        hap1_stop = cfg.args.hap1_poss[cigar_stop]
+        cigar_stop = bisect_left(cfg.args.ref_poss_hap1, stop)
+        hap1_start = int(cfg.args.hap1_poss[cigar_start])
+        hap1_stop = int(cfg.args.hap1_poss[cigar_stop])
         hap1_ref = cfg.args.hap1[hap1_start:hap1_stop]
         hap1_cigar = cfg.args.hap1_cig[cigar_start:cigar_stop]
 
@@ -53,9 +63,9 @@ def add_haplotype_data(read_data):
 
     elif hap == 2:
         cigar_start = bisect_left(cfg.args.ref_poss_hap2, start)
-        cigar_stop = bisect_right(cfg.args.ref_poss_hap2, stop)
-        hap2_start = cfg.args.hap2_poss[cigar_start]
-        hap2_stop = cfg.args.hap2_poss[cigar_stop]
+        cigar_stop = bisect_left(cfg.args.ref_poss_hap2, stop)
+        hap2_start = int(cfg.args.hap2_poss[cigar_start])
+        hap2_stop = int(cfg.args.hap2_poss[cigar_stop])
         hap2_ref = cfg.args.hap2[hap2_start:hap2_stop]
         hap2_cigar = cfg.args.hap2_cig[cigar_start:cigar_stop]
 
@@ -129,9 +139,9 @@ def realign_read(read_data):
     read_id, ref_name, start, stop, cigar, hap_cigar, ref, hap_ref, seq, hap = read_data
 
     # convert strings to np character arrays for efficiency
-    int_ref = np.zeros(len(ref), dtype=np.uint8)
-    for i in range(len(ref)): 
-        int_ref[i] = cfg.base_dict[ref[i]]
+    int_ref = np.zeros(len(hap_ref), dtype=np.uint8)
+    for i in range(len(hap_ref)): 
+        int_ref[i] = cfg.base_dict[hap_ref[i]]
     int_seq = np.zeros(len(seq), dtype=np.uint8)
     for i in range(len(seq)): 
         int_seq[i] = cfg.base_dict[seq[i]]
@@ -140,7 +150,7 @@ def realign_read(read_data):
     new_cigar = align(int_ref, int_seq, cigar, cfg.args.sub_scores, cfg.args.hp_scores)
     # print(  f'aln read:{read_id:8s}'
     #         f'\tseq:{len(seq)} {seq_len(cigar)}->{seq_len(new_cigar)}'
-    #         f'\tref:{len(ref)} {ref_len(cigar)}->{ref_len(new_cigar)}')
+    #         f'\tref:{len(hap_ref)} {ref_len(cigar)}->{ref_len(new_cigar)}')
 
     with cfg.read_count.get_lock():
         cfg.read_count.value += 1

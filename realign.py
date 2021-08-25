@@ -1,4 +1,4 @@
-import argparse, os
+import argparse, os, subprocess
 import numpy as np
 from collections import defaultdict
 
@@ -36,8 +36,10 @@ def argparser():
     # boolean options
     parser.add_argument("--plot", action="store_true")
     parser.add_argument("--recalc_cms", action="store_true")
-    parser.add_argument("--apply_vcf")
     parser.add_argument("--min_snp_qual", type=int, default=0)
+
+    parser.add_argument("--apply_vcf")
+    parser.add_argument("--std_cigar", action="store_true")
     parser.add_argument("--indels_only", action="store_true")
 
     return parser
@@ -66,8 +68,9 @@ def main():
     read_data = get_read_data(cfg.args.bam)
 
     if cfg.args.apply_vcf:
-        print(f"> splitting vcf '{cfg.args.vcf}'")
-        vcf1, vcf2 = split_vcf(cfg.args.vcf, f"{cfg.args.out}/hap")
+        print(f"\n> splitting vcf '{cfg.args.apply_vcf}'")
+        vcf1, vcf2 = split_vcf(cfg.args.apply_vcf, 
+                f"{os.extsep.join(cfg.args.apply_vcf.split(os.extsep)[:-2])}")
 
         print(f"> indexing '{vcf1}' and\n        '{vcf2}'")
         subprocess.run(['tabix', '-p', 'vcf', vcf1])
@@ -81,13 +84,17 @@ def main():
         print(f"> applying '{vcf2}' to reference")
         cfg.args.hap2, cfg.args.hap2_cig = apply_vcf(vcf2, cfg.args.reference)
 
-        print(f"> standardizing haplotype cigars")
-        _, _, _, _, _, cfg.args.hap1_cig, _, _, _, _ = \
-                standardize_cigar(("1", "chr19", 0, 0, "", cfg.args.hap1_cig, 
-                    cfg.args.reference, "", cfg.args.hap1, 2))
-        _, _, _, _, _, cfg.args.hap2_cig, _, _, _, _ = \
-                standardize_cigar(("2", "chr19", 0, 0, "", cfg.args.hap2_cig, 
-                    cfg.args.reference, "", cfg.args.hap2, 2))
+        if cfg.args.std_cigar:
+            print(f"> standardizing haplotype cigars")
+            _, _, _, _, _, cfg.args.hap1_cig, _, _, _, _ = \
+                    standardize_cigar(("1", "chr19", 0, 0, "", cfg.args.hap1_cig, 
+                        cfg.args.reference, "", cfg.args.hap1, 2))
+            _, _, _, _, _, cfg.args.hap2_cig, _, _, _, _ = \
+                    standardize_cigar(("2", "chr19", 0, 0, "", cfg.args.hap2_cig, 
+                        cfg.args.reference, "", cfg.args.hap2, 2))
+        else:
+            cfg.args.hap1_cig = cfg.args.hap1_cig.replace('X','M').replace('=','M')
+            cfg.args.hap2_cig = cfg.args.hap2_cig.replace('X','M').replace('=','M')
 
         print(f"> precomputing haplotype positions")
         cfg.args.ref_poss_hap1, cfg.args.hap1_poss = \
@@ -98,7 +105,7 @@ def main():
     with cfg.read_count.get_lock(): cfg.read_count.value = 0
     with mp.Pool() as pool:
         if cfg.args.apply_vcf: 
-            print('\n> adding haplotype data to reads')
+            print('> adding haplotype data to reads')
         read_data = list(filter(None, pool.map(add_haplotype_data, read_data)))
         if cfg.args.apply_vcf:
             read_data = pool.map(to_haplotype_ref, read_data)
@@ -110,9 +117,10 @@ def main():
         read_data = pool.map(realign_read, read_data)
 
     with cfg.read_count.get_lock(): cfg.read_count.value = 0
-    print('\n> converting to standard INDEL format')
     with mp.Pool() as pool:
-        read_data = pool.map(standardize_cigar, read_data)
+        if cfg.args.std_cigar:
+            print('\n> converting to standard INDEL format')
+            read_data = pool.map(standardize_cigar, read_data)
         if cfg.args.apply_vcf:
             read_data = pool.map(from_haplotype_ref, read_data)
 
@@ -125,4 +133,9 @@ def main():
 if __name__ == "__main__":
     parser = argparser()
     cfg.args = parser.parse_args()
+
+    if cfg.args.indels_only and not cfg.args.std_cigar:
+        print("ERROR: cannot set 'indels_only' without 'std_cigar'.")
+        exit(1)
+
     main()

@@ -429,4 +429,4 @@ def change_ref(read_cig, hap_cig, ref, read, hap):
 
 
 def flip_cigar_basis(cigar):
-    cigar = cigar.replace('I', 'd').replace('D','i').upper()
+    return cigar.replace('I', 'd').replace('D','i').upper()
