@@ -26,7 +26,7 @@ base_dict['t'] = 4
 cigars = 'MIDNSHP=XB'
 cigar_dict = {
     'M': 0, 'I': 1, 'D': 2, 'N': 3, 'S': 4,
-    'H': 5, 'P': 6, 'E': 7, 'X': 8, 'B': 9
+    'H': 5, 'P': 6, '=': 7, 'X': 8, 'B': 9
 }
 
 __version__ = "0.0.1"

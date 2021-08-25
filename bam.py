@@ -43,7 +43,8 @@ def add_haplotype_data(read_data):
     read_id, ref_name, start, stop, read_cigar, ref, read_seq, hap = read_data
 
     if not cfg.args.apply_vcf: # blank hap cigar/ref
-        return (read_id, ref_name, start, stop, read_cigar, "", ref, "", read_seq, hap)
+        return (read_id, ref_name, start, stop, read_cigar, \
+                "="*len(ref), ref, ref, read_seq, hap)
 
     if hap == 1:
         cigar_start = bisect_left(cfg.args.ref_poss_hap1, start)
