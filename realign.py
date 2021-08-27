@@ -101,34 +101,31 @@ def main():
                 get_refseq_positions(cfg.args.hap1_cig)
         cfg.args.ref_poss_hap2, cfg.args.hap2_poss = \
                 get_refseq_positions(cfg.args.hap2_cig)
+    else: print(' ')
 
     print('> adding haplotype data to reads')
     with cfg.read_count.get_lock(): cfg.read_count.value = 0
     with mp.Pool() as pool:
         read_data = list(filter(None, pool.map(add_haplotype_data, read_data)))
 
-    if cfg.args.apply_vcf:
-        print('\n> changing read basis ref->hap')
-        with cfg.read_count.get_lock(): cfg.read_count.value = 0
-        with mp.Pool() as pool:
+        if cfg.args.apply_vcf:
+            print('\n> changing read basis ref->hap')
+            with cfg.read_count.get_lock(): cfg.read_count.value = 0
             read_data = pool.map(to_haplotype_ref, read_data)
 
-    print('\n> computing read realignments')
-    with cfg.read_count.get_lock(): cfg.read_count.value = 0
-    with mp.Pool() as pool:
+        print('\n> computing read realignments')
+        with cfg.read_count.get_lock(): cfg.read_count.value = 0
         print(f"\r    0 reads realigned.", end='', flush=True)
         read_data = pool.map(realign_read, read_data)
 
-    with cfg.read_count.get_lock(): cfg.read_count.value = 0
-    with mp.Pool() as pool:
+        with cfg.read_count.get_lock(): cfg.read_count.value = 0
         if cfg.args.std_cigar:
             print('\n> converting to standard INDEL format')
             read_data = pool.map(standardize_cigar, read_data)
 
-    if cfg.args.apply_vcf:
-        print('\n> changing read basis hap->ref')
-        with cfg.read_count.get_lock(): cfg.read_count.value = 0
-        with mp.Pool() as pool:
+        if cfg.args.apply_vcf:
+            print('\n> changing read basis hap->ref')
+            with cfg.read_count.get_lock(): cfg.read_count.value = 0
             read_data = pool.map(from_haplotype_ref, read_data)
 
     print(f"\n> saving results to '{cfg.args.out}'")

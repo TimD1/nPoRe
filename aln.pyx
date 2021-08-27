@@ -281,7 +281,7 @@ cdef int[:] get_breaks(int chunk_size, int array_size):
 @cython.wraparound(False)
 cpdef align(char[::1] ref, char[::1] seq, str cigar, 
         float[:,::1] sub_scores, float[:,::1] hp_scores, 
-        float indel_start=5, float indel_extend=2, int max_b_rows = 100001,
+        float indel_start=5, float indel_extend=2, int max_b_rows = 20001,
         int r = 30):
     ''' Perform alignment.  '''
 
