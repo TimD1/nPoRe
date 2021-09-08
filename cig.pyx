@@ -333,7 +333,8 @@ cpdef standardize_cigar(read_data):
     cdef char I = 1
     cdef char D = 2
 
-    read_id, ref_name, start, stop, cigar, hap_cigar, ref, hap_ref, seq, hap = read_data
+    read_id, chunk_idx, ref_name, start, stop, \
+            cigar, hap_cigar, ref, hap_ref, seq, hap = read_data
 
     # can optionally only report INDELs, assume substitutions found already
     if cfg.args.indels_only:
@@ -382,9 +383,10 @@ cpdef standardize_cigar(read_data):
 
     with cfg.read_count.get_lock():
         cfg.read_count.value += 1
-        print(f"\r    {cfg.read_count.value} CIGARs standardized.", end='', flush=True)
+        print(f"\r    {cfg.read_count.value} CIGAR chunks standardized.", end='', flush=True)
 
-    return (read_id, ref_name, start, stop, new_cigar, hap_cigar, ref, hap_ref, seq, hap)
+    return (read_id, chunk_idx, ref_name, start, stop, 
+            new_cigar, hap_cigar, ref, hap_ref, seq, hap)
 
 
 
@@ -548,3 +550,121 @@ cpdef change_ref(read_cig_str, hap_cig_str, ref_str, read_str, hap_str):
 
 def flip_cigar_basis(cigar):
     return cigar.replace('I', 'd').replace('D','i').upper()
+
+
+
+def chunk_cigars(data, chunk_size = 1_000_000):
+    with cfg.read_count.get_lock():
+        cfg.read_count.value = 0
+
+    chunk_data = []
+    for read_data in data:
+        read_id, ref_name, start, stop, cigar, \
+                hap_cigar, ref, hap_ref, seq, hap = read_data
+
+        seq_ptr = 0
+        ref_ptr = 0
+        cig_ptr = 0
+        cig_ct = 0
+        for op in cigar:
+            if op == 'I':
+                seq_ptr += 1
+            elif op == 'D':
+                ref_ptr += 1
+            elif op == '=' or op == 'M' or op == 'X':
+                seq_ptr += 1
+                ref_ptr += 1
+            else:
+                print(f'ERROR: CIGAR op {op} not expected.')
+                exit(1)
+            cig_ptr += 1
+            cig_ct += 1
+
+            prev_seq_ptr = 0
+            prev_ref_ptr = 0
+            prev_cig_ptr = 0
+            chunk_idx = 0
+            if cig_ct >= chunk_size:
+                chunk_data.append(
+                        (read_id, chunk_idx, ref_name, start, stop, 
+                            cigar[prev_cig_ptr:cig_ptr], hap_cigar, 
+                            ref[prev_ref_ptr:ref_ptr], hap_ref, 
+                            seq[prev_seq_ptr:seq_ptr], hap)
+                        )
+                with cfg.read_count.get_lock():
+                    cfg.read_count.value += 1
+                    print(f"\r    {cfg.read_count.value} CIGAR chunks created.", 
+                            end='', flush=True)
+                cig_ct = 0
+                chunk_idx += 1
+                prev_cig_ptr = cig_ptr
+                prev_ref_ptr = ref_ptr
+                prev_seq_ptr = seq_ptr
+
+        if cig_ptr != prev_cig_ptr:
+            chunk_data.append((
+                    read_id, chunk_idx, ref_name, start, stop, 
+                    cigar[prev_cig_ptr:cig_ptr], hap_cigar, 
+                    ref[prev_ref_ptr:ref_ptr], hap_ref, 
+                    seq[prev_seq_ptr:seq_ptr], hap
+            ))
+        with cfg.read_count.get_lock():
+            cfg.read_count.value += 1
+            print(f"\r    {cfg.read_count.value} CIGAR chunks created.", 
+                    end='', flush=True)
+
+    return chunk_data
+
+
+
+def stitch_cigars(chunk_data):
+
+    with cfg.read_count.get_lock():
+        cfg.read_count.value = 0
+    data = []
+    cigar = ""
+    ref = ""
+    seq = ""
+
+    prev_chunk_read_id = ""
+    prev_chunk_idx = -1
+    for chunk in chunk_data:
+        chunk_read_id, chunk_idx, chunk_ref_name, start, stop, chunk_cigar, \
+                hap_cigar, chunk_ref, hap_ref, chunk_seq, chunk_hap = chunk_data
+
+        if chunk_read_id == prev_chunk_read_id: # same read
+
+            # append data to current read
+            assert chunk_idx == prev_chunk_idx+1
+            prev_chunk_idx = chunk_idx
+            cigar += chunk_cigar
+            ref += chunk_ref
+            seq += chunk_seq
+
+        else: # new read
+
+            # save previous read
+            data.append((
+                    chunk_read_id, chunk_ref_name, start, stop,
+                    cigar, hap_cigar, ref, hap_ref, seq, chunk_hap
+            ))
+
+            # start new one
+            assert chunk_idx == 0
+            cigar = chunk_cigar
+            ref = chunk_ref
+            seq = chunk_seq
+            prev_chunk_read_id = chunk_read_id
+            prev_chunk_idx = chunk_idx
+
+        with cfg.read_count.get_lock():
+            cfg.read_count.value += 1
+            print(f"\r    {cfg.read_count.value} CIGAR chunks stitched.", 
+                    end='', flush=True)
+
+    data.append((
+            chunk_read_id, chunk_ref_name, start, stop,
+            cigar, hap_cigar, ref, hap_ref, seq, chunk_hap
+    ))
+
+    return data

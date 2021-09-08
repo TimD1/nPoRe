@@ -66,7 +66,7 @@ def main():
     # cfg.args.sub_scores, cfg.args.hp_scores = calc_score_matrices(subs, hps)
 
     # print(f"> realigning hap sequences")
-    # with mp.Pool(2) as pool:
+    # with mp.Pool() as pool:
     #     data = pool.map(realign_read, [cigar1_data, cigar2_data])
 
     # print(f"> saving CIGAR data")
@@ -80,12 +80,16 @@ def main():
     cigar2_data = pickle.load(open('cigar2_data.pkl', 'rb'))
     data = [cigar1_data, cigar2_data]
 
-    # if cfg.args.std_cigar:
-    #     print(f"\n> standardizing hap cigars")
-    #     with mp.Pool(2) as pool:
-    #         data = pool.map(standardize_cigar, data)
-    # cigar1_data = data[0]
-    # cigar2_data = data[1]
+    if cfg.args.std_cigar:
+        print(f"\n> chunking hap cigars")
+        data = chunk_cigars(data)
+        print(f"\n> standardizing hap cigars")
+        with mp.Pool() as pool:
+            data = pool.map(standardize_cigar, data)
+        print(f"\n> stitching hap cigars")
+        data = stitch_cigars(data)
+    cigar1_data = data[0]
+    cigar2_data = data[1]
 
     # print(f"> saving CIGAR data")
     # pickle.dump(cigar1_data, open('cigar1_data.pkl', 'wb'))
@@ -95,11 +99,11 @@ def main():
     # cigar1_data = pickle.load(open('cigar1_data.pkl', 'rb'))
     # cigar2_data = pickle.load(open('cigar2_data.pkl', 'rb'))
 
-    print(f"> saving debug output to bam")
-    hap_to_bam(cigar1_data, cfg.args.out)
-    hap_to_bam(cigar2_data, cfg.args.out)
-    subprocess.run(['samtools', 'index', f'{cfg.args.out}1.bam'])
-    subprocess.run(['samtools', 'index', f'{cfg.args.out}2.bam'])
+    # print(f"> saving debug output to bam")
+    # hap_to_bam(cigar1_data, cfg.args.out)
+    # hap_to_bam(cigar2_data, cfg.args.out)
+    # subprocess.run(['samtools', 'index', f'{cfg.args.out}1.bam'])
+    # subprocess.run(['samtools', 'index', f'{cfg.args.out}2.bam'])
 
     print('\n> generating standardized vcfs')
     vcf1 = gen_vcf(cigar1_data, cfg.args.out+"_")
