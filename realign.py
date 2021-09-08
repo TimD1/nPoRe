@@ -25,6 +25,7 @@ def argparser():
     parser.add_argument("--contig", type=str, default="chr19")
     parser.add_argument("--contig_beg", type=int, default=1)
     parser.add_argument("--contig_end", type=int, default=58592616)
+    parser.add_argument("--max_reads", type=int, default=0)
 
     # algorithm parameters
     parser.add_argument("--max_hp", type=int, default=100)

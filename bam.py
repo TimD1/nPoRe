@@ -58,7 +58,7 @@ def add_haplotype_data(read_data):
         hap1_start = int(cfg.args.hap1_poss[cigar_start])
         hap1_stop = int(cfg.args.hap1_poss[cigar_stop])
         hap1_ref = cfg.args.hap1[hap1_start:hap1_stop]
-        hap1_cigar = cfg.args.hap1_cig[cigar_start:cigar_stop]
+        hap1_cigar = cfg.args.hap1_cig[cigar_start+1:cigar_stop+1]
 
         with cfg.read_count.get_lock():
             cfg.read_count.value += 1
@@ -74,7 +74,7 @@ def add_haplotype_data(read_data):
         hap2_start = int(cfg.args.hap2_poss[cigar_start])
         hap2_stop = int(cfg.args.hap2_poss[cigar_stop])
         hap2_ref = cfg.args.hap2[hap2_start:hap2_stop]
-        hap2_cigar = cfg.args.hap2_cig[cigar_start:cigar_stop]
+        hap2_cigar = cfg.args.hap2_cig[cigar_start+1:cigar_stop+1]
 
         with cfg.read_count.get_lock():
             cfg.read_count.value += 1
@@ -135,6 +135,8 @@ def get_read_data(bam_fn):
             kept += 1
         rds += 1
         print(f'\r    {rds} of {nreads} reads processed, {kept} primary reads kept.', end='', flush=True)
+        if cfg.args.max_reads and kept >= cfg.args.max_reads:
+            break
 
     return read_data
 
@@ -152,6 +154,10 @@ def realign_read(read_data):
     int_seq = np.zeros(len(seq), dtype=np.uint8)
     for i in range(len(seq)): 
         int_seq[i] = cfg.base_dict[seq[i]]
+
+    # print(  f'aln read:{read_id:8s}'
+    #         f'\tseq:{len(seq)} {seq_len(cigar)}'
+    #         f'\tref:{len(hap_ref)} {ref_len(cigar)}')
 
     # align
     new_cigar = align(int_ref, int_seq, cigar, cfg.args.sub_scores, cfg.args.hp_scores)
@@ -261,7 +267,7 @@ def hap_to_bam(hap_data, bam_fn_pre=''):
         new_alignment.query_qualities = pysam.qualitystring_to_array('X'*len(seq))
         new_alignment.tags            = [('HP', hap_id)]
         new_alignment.reference_id    = 0
-        new_alignment.cigarstring     = cigar
+        new_alignment.cigarstring     = collapse_cigar(cigar)
         fh.write(new_alignment)
     print(f"    wrote '{bam_fn}'")
 
@@ -280,7 +286,7 @@ def get_confusion_matrices():
     if not cfg.args.recalc_cms and \
             os.path.isfile(f'{cfg.args.stats_dir}/subs_cm.npy') and \
             os.path.isfile(f'{cfg.args.stats_dir}/hps_cm.npy'):
-        print("> loading confusion matrices\r", end='')
+        print("> loading confusion matrices")
         return np.load(f'{cfg.args.stats_dir}/subs_cm.npy'), \
                 np.load(f'{cfg.args.stats_dir}/hps_cm.npy')
     else:

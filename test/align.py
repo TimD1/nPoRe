@@ -28,6 +28,8 @@ def main():
     ref_rd_cigs.append(("CACACACATATATATAGG", "CACACACATATATAGG", "14=2D2="))
     ref_rd_cigs.append(("CACACACATATATATAGG", "CACACACATATATATATAGG", "16=2I2="))
     ref_rd_cigs.append(("AACAACAACAACAAAAA", "AACAACAACAAAAA", "10=3D4="))
+    ref_rd_cigs.append(("GCACAGCAGTC", "GCACAGTC", "1=2D2=1D5="))
+    ref_rd_cigs.append(("AAAAAAAA", "AAAAAA", "1=1D3=1D2="))
 
     # load existing score mats
     subs, hps = get_confusion_matrices()
@@ -36,6 +38,8 @@ def main():
     # test alignment algorithm
     print('\n> aligning...')
     for ref, seq, cigar in ref_rd_cigs:
+        print("\n\n\n")
+        cigar = expand_cigar(cigar)
 
         int_ref = np.zeros(len(ref), dtype=np.uint8)
         for i in range(len(ref)): 
@@ -45,14 +49,15 @@ def main():
             int_seq[i] = cfg.base_dict[seq[i]]
 
         # new_cigar = align(int_ref, int_seq, cigar, sub_scores, hp_scores, r=4)
-        # print(f"Cigar: {expand_cigar(cigar)}")
+        # print(f"Cigar: {cigar}")
         # dump(ref, seq, new_cigar)
 
-        read_data = ("read_id", "ref", 0, cigar, ref, seq)
-        read_id, ref_name, start, new_cigar, ref, seq = standardize_cigar(read_data)
+        read_data = ("read_id", "ref", 0, 0, cigar, "", ref, "", seq, 0)
+        read_id, ref_name, start, stop, new_cigar, hap_cigar, \
+                ref, hap_ref, seq, hap = standardize_cigar(read_data)
 
-        print(f"\nCigar: {expand_cigar(cigar)}")
-        dump(ref, seq, expand_cigar(new_cigar))
+        print(f"\nCigar: {cigar}")
+        dump(ref, seq, new_cigar)
 
 
 

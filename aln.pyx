@@ -265,13 +265,19 @@ cdef float get_max(float[:,:,:,:] matrix, int row, int col, int typs, int VAL):
 
 @cython.boundscheck(False)
 @cython.wraparound(False)
-cdef int[:] get_breaks(int chunk_size, int array_size):
+cdef int[:] get_breaks(int chunk_size, int array_size, int[:] inss, int[:] dels):
     cdef int buf_len = 1 + math.ceil( (array_size-1) / (chunk_size-1) )
     breaks_buf = np.zeros(buf_len, dtype=np.intc)
     cdef int[:] breaks = breaks_buf
     cdef int i
     for i in range(buf_len-1):
         breaks[i] = i * (chunk_size-1)
+
+        # don't split on 'DI', since that may have originally been '='
+        if i > 0 and inss[breaks[i]+1] == inss[breaks[i]]+1 and \
+                dels[breaks[i]] == dels[breaks[i]-1]+1:
+            breaks[i] -= 1
+
     breaks[buf_len-1] = array_size-1
     return breaks
 
@@ -292,7 +298,7 @@ cpdef align(char[::1] ref, char[::1] seq, str cigar,
     # precompute offsets, breakpoints, and homopolymers
     cdef int[:] inss = get_inss(cigar)
     cdef int[:] dels = get_dels(cigar)
-    cdef int[:] breaks = get_breaks(max_b_rows, len(seq) + len(ref) + 1)
+    cdef int[:] breaks = get_breaks(max_b_rows, len(seq) + len(ref) + 1, inss, dels)
     cdef int[:] ref_hp_lens = get_hp_lengths(ref)
 
     # define useful constants

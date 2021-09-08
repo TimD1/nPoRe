@@ -148,7 +148,7 @@ def split_vcf(vcf_fn, vcf_out_pre=''):
             unphased = False
 
     if unphased:
-        print(f"WARNING: VCF file '{cfg.args.apply_vcf}' may be unphased.")
+        print(f"WARNING: VCF file may be unphased.")
 
     return vcf_out1_fn, vcf_out2_fn
 
@@ -195,20 +195,42 @@ def merge_vcfs(vcf_fn1, vcf_fn2, out_fn=None):
 
             else:                                        # diff 1|2
                 record = record1.copy()
-                reflen_diff = len(record1.alleles[0]) - len(record2.alleles[0])
-                if reflen_diff > 0: # hap1 longer del
+                indel_len1 = len(record1.alleles[1]) - len(record1.alleles[0])
+                indel_len2 = len(record2.alleles[1]) - len(record2.alleles[0])
+
+                if indel_len1 >= 0 and indel_len2 >= 0: # both sub/ins
                     record.alleles = (
                             record1.alleles[0], 
                             record1.alleles[1], 
-                            record2.alleles[1] + record1.alleles[0] \
-                                [len(record2.alleles[0]):len(record1.alleles[0])])
-                else:               # same, hap2 longer del
-                    reflen_diff = abs(reflen_diff)
+                            record2.alleles[1])
+
+                if indel_len1 < 0 and indel_len2 < 0: # both del
+                    reflen_diff = len(record1.alleles[0]) - len(record2.alleles[0])
+                    if reflen_diff > 0: # hap1 longer del
+                        record.alleles = (
+                                record1.alleles[0], 
+                                record1.alleles[1], 
+                                record2.alleles[1] + record1.alleles[0] \
+                                    [len(record2.alleles[0]):len(record1.alleles[0])])
+                    else:               # same, hap2 longer del
+                        reflen_diff = abs(reflen_diff)
+                        record.alleles = (
+                                record2.alleles[0], 
+                                record1.alleles[1] + record2.alleles[0]\
+                                    [len(record1.alleles[0]):len(record2.alleles[0])], 
+                                record2.alleles[1])
+
+                elif indel_len1 < 0 and indel_len2 >= 0:
                     record.alleles = (
                             record1.alleles[0], 
-                            record1.alleles[1] + record2.alleles[0]\
-                                [len(record1.alleles[0]):len(record2.alleles[0])], 
-                            record2.alleles[1])
+                            record1.alleles[1], 
+                            record2.alleles[1] + record1.alleles[0][1:])
+
+                elif indel_len2 < 0 and indel_len1 >= 0:
+                    record.alleles = (
+                            record2.alleles[0], 
+                            record2.alleles[1], 
+                            record1.alleles[1] + record2.alleles[0][1:])
 
                 for sample in record.samples:
                     record.samples[sample]['GT'] = (1,2)
@@ -244,8 +266,11 @@ def apply_vcf(vcf_fn, ref):
             cfg.args.contig, cfg.args.contig_beg, cfg.args.contig_end):
         pos = record.pos - 1
 
-        if pos < ref_ptr: # overlapping indels, ignore second
-            # print(f'skipping pos: {pos}, alleles: {record.alleles}')
+        if pos < ref_ptr: # overlapping indels, allow second if insertion
+            indel_len = len(record.alleles[1]) - len(record.alleles[0])
+            if indel_len > 0:
+                seq += record.alleles[1][len(record.alleles[0]):]
+                cig += 'I' * indel_len
             continue
         else:
             seq += ref[ref_ptr:pos]
@@ -287,15 +312,11 @@ def apply_vcf(vcf_fn, ref):
 def gen_vcf(read_data, vcf_out_pre = ''):
 
     hap_id, ctg_name, start, stop, cigar, hap_cigar, ref, hap_ref, seq, hap = read_data
-    cigar = expand_cigar(cigar)
 
     # create VCF header
     vcf_header = pysam.VariantHeader()
     vcf_header.add_sample('SAMPLE')
-    vcf_header.add_meta('contig', 
-            items=[('ID', ctg_name)])
-    vcf_header.add_meta('contig_length', 
-            items=[('ID', len(ref))])
+    vcf_header.add_meta('contig', items=[('ID', ctg_name)])
     vcf_header.add_meta('FORMAT', 
             items=[('ID',"GT"), ('Number',1), ('Type','String'), 
                 ('Description','Genotype')])
@@ -314,7 +335,25 @@ def gen_vcf(read_data, vcf_out_pre = ''):
     cig_len = len(cigar)
     while cig_ptr < cig_len:
 
-        if cigar[cig_ptr] == 'M':
+        if cigar[cig_ptr] == '=':
+            ref_ptr += 1
+            seq_ptr += 1
+            cig_ptr += 1
+
+        elif cigar[cig_ptr] == 'X':
+            record = vcf_out.header.new_record(
+                    contig = ctg_name,
+                    start = ref_ptr,
+                    alleles = (ref[ref_ptr], seq[seq_ptr]),
+                    qual = 10,
+                    filter = 'PASS'
+            )
+            vcf_out.write(record)
+            ref_ptr += 1
+            seq_ptr += 1
+            cig_ptr += 1
+
+        elif cigar[cig_ptr] == 'M':
             # match, don't add to VCF
             if ref[ref_ptr] == seq[seq_ptr]:
                 ref_ptr += 1
@@ -365,5 +404,6 @@ def gen_vcf(read_data, vcf_out_pre = ''):
         else:
             print(f"ERROR: unrecognized CIGAR operation '{cigar[cig_ptr]}'")
             exit(1)
+    vcf_out.close()
 
     return vcf_out_fn

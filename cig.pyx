@@ -97,19 +97,18 @@ def extend_pysam_cigar(ops, counts):
 
 
 
-@cython.boundscheck(False)
-@cython.wraparound(False)
+# @cython.boundscheck(False)
+# @cython.wraparound(False)
 cdef push_indels_left(char[::1] cigar, char[::1] seq, char push_op):
     ''' Push CIGAR indels leftwards. '''
     cdef char M = 0
     cdef char E = 7
     cdef char X = 8
 
-    cdef int diff = 0
     cdef int seq_ptr = 0
     cdef int cig_ptr = 0
     cdef int cig_len = len(cigar)
-    cdef int i, seq_indel_ptr, cig_indel_ptr, indel_len, shift_len, nshifts
+    cdef int i, indel_len, nshifts
     cdef char op
 
     nshifts_buf_arr = np.zeros(cig_len, dtype = np.uint8)
@@ -129,49 +128,32 @@ cdef push_indels_left(char[::1] cigar, char[::1] seq, char push_op):
         else:
             indel_len = 0
 
-        # iterate, pushing shorter prefixes of indel left
-        shift_len = indel_len
-        seq_indel_ptr = seq_ptr
-        cig_indel_ptr = cig_ptr
+        # push indel as far left as possible (keeping seq same)
+        nshifts = 0
+        while cig_ptr-nshifts > 0 and seq_ptr-nshifts > 0 and \
+                seq[seq_ptr-nshifts-1] == seq[seq_ptr-nshifts-1 + indel_len] and \
+                (cigar[cig_ptr-nshifts-1] == E or cigar[cig_ptr-nshifts-1] == M) :
+            nshifts += 1
 
-        # while not at CIGAR start and we still have indels to push
-        while cig_indel_ptr > 0 and shift_len > 0:
+        # fill buffers (can't fully update in-place)
+        for i in range(nshifts):
+            nshifts_buf[i] = cigar[cig_ptr-nshifts+i]
+        for i in range(indel_len):
+            shiftlen_buf[i] = cigar[cig_ptr+i]
 
-            # push indel as far left as possible (keeping seq same)
-            nshifts = 0
-            while seq_indel_ptr-nshifts > 0 and \
-                    seq[seq_indel_ptr-nshifts-1] == seq[seq_indel_ptr-nshifts-1 + shift_len] and \
-                    (cigar[cig_indel_ptr-nshifts-1] == E or cigar[cig_indel_ptr-nshifts-1] == M) :
-                nshifts += 1
-                diff = 1
-            
-            # update CIGAR, try shorter prefix
-            # print(cigar)
+        # update cigar
+        for i in range(indel_len):
+            cigar[cig_ptr-nshifts+i] = shiftlen_buf[i]
+        for i in range(nshifts):
+            cigar[cig_ptr-nshifts+indel_len+i] = nshifts_buf[i]
 
-            # fill buffers (can't fully update in-place)
-            for i in range(nshifts):
-                nshifts_buf[i] = cigar[cig_indel_ptr-nshifts+i]
-            for i in range(shift_len):
-                shiftlen_buf[i] = cigar[cig_indel_ptr+i]
-
-            # update cigar
-            for i in range(shift_len):
-                cigar[cig_indel_ptr-nshifts+i] = shiftlen_buf[i]
-            for i in range(nshifts):
-                cigar[cig_indel_ptr-nshifts+shift_len+i] = nshifts_buf[i]
-
+        if indel_len:
+            print(f'{indel_len}{cfg.cigars[push_op]} shifted left {nshifts} at pos {seq_ptr}')
             # print(' '*(cig_ptr) + '| cig_ptr')
-            # print(' '*(cig_indel_ptr) + '| cig_indel_ptr')
-            # print(cigar, f'{indel_len}{cfg.cigars[push_op'} total,' + \
-            #              f'{shift_len}{cfg.cigars[push_op]} shifted back {nshifts}')
+            # print(int_to_cig(cigar), f'{indel_len}{cfg.cigars[push_op]} shifted left {nshifts}')
             # print(' '*(seq_ptr) + '| seq_ptr')
-            # print(' '*(seq_indel_ptr) + '| seq_indel_ptr')
-            # print(seq)
+            # print(int_to_bases(seq))
             # print(' ')
-
-            cig_indel_ptr -= nshifts
-            seq_indel_ptr -= nshifts
-            shift_len -= 1
 
         # update pointers
         if indel_len > 0:
@@ -183,18 +165,91 @@ cdef push_indels_left(char[::1] cigar, char[::1] seq, char push_op):
         elif op == push_op:
             seq_ptr += indel_len
 
-    return cigar, diff
+    return cigar
 
 
 
-@cython.boundscheck(False)
-@cython.wraparound(False)
+# @cython.boundscheck(False)
+# @cython.wraparound(False)
+cdef push_indels_right(char[::1] cigar, char[::1] seq, char push_op):
+    ''' Push CIGAR indels rightwards. '''
+    cdef char M = 0
+    cdef char E = 7
+    cdef char X = 8
+
+    cdef int cig_len = len(cigar)
+    cdef int seq_len = len(seq)
+    cdef int seq_ptr = seq_len-1
+    cdef int cig_ptr = cig_len-1
+    cdef int i, indel_len, nshifts
+    cdef char op
+
+    nshifts_buf_arr = np.zeros(cig_len, dtype = np.uint8)
+    cdef char[::1] nshifts_buf = nshifts_buf_arr
+    shiftlen_buf_arr = np.zeros(cig_len, dtype = np.uint8)
+    cdef char[::1] shiftlen_buf = shiftlen_buf_arr
+
+    while cig_ptr >= 0:
+
+        # get indel length
+        op = cigar[cig_ptr]
+        if op == push_op:
+            indel_len = 1
+            while cig_ptr - indel_len >= 0 and \
+                    cigar[cig_ptr - indel_len] == push_op:
+                indel_len += 1
+        else:
+            indel_len = 0
+
+        # push indel as far right as possible (keeping seq same)
+        nshifts = 0
+        while cig_ptr+nshifts+1 < cig_len and seq_ptr+nshifts+1 < seq_len and \
+                seq[seq_ptr+nshifts+1] == seq[seq_ptr+nshifts+1 - indel_len] and \
+                (cigar[cig_ptr+nshifts+1] == E or cigar[cig_ptr+nshifts+1] == M) :
+            nshifts += 1
+
+        # fill buffers (can't fully update in-place)
+        for i in range(nshifts):
+            nshifts_buf[i] = cigar[cig_ptr+i+1]
+        for i in range(indel_len):
+            shiftlen_buf[i] = cigar[cig_ptr-indel_len+i+1]
+
+        # update cigar
+        for i in range(indel_len):
+            cigar[cig_ptr-indel_len+nshifts+i+1] = shiftlen_buf[i]
+        for i in range(nshifts):
+            cigar[cig_ptr-indel_len+i+1] = nshifts_buf[i]
+
+        if indel_len:
+            print(f'{indel_len}{cfg.cigars[push_op]} shifted left {nshifts} at pos {seq_ptr}')
+
+        #     print(' '*(cig_ptr) + '| cig_ptr')
+        #     print(int_to_cig(cigar), f'{indel_len}{cfg.cigars[push_op]} shifted right {nshifts}')
+        #     print(' '*(seq_ptr) + '| seq_ptr')
+        #     print(int_to_bases(seq))
+        #     print(' ')
+
+        # update pointers
+        if indel_len > 0:
+            cig_ptr -= indel_len
+        else:
+            cig_ptr -= 1
+        if op == M or op == X or op == E:
+            seq_ptr -= 1
+        elif op == push_op:
+            seq_ptr -= indel_len
+
+    return cigar
+
+
+
+# @cython.boundscheck(False)
+# @cython.wraparound(False)
 cdef push_inss_thru_dels(char[::1] cigar):
     ''' Enable CIGAR insertions to be pushed leftward through deletions. '''
     cdef char I = 1
     cdef char D = 2
 
-    cdef int diff = 0
     cdef int cig_len = len(cigar)
     cdef int i, j, dels, del_idx, inss, ins_idx
     for i in range(cig_len-1):
@@ -218,8 +273,9 @@ cdef push_inss_thru_dels(char[::1] cigar):
             for j in range(dels):
                 cigar[del_idx+1 + inss + j] = D
 
-            diff = 1
-    return cigar, diff
+            print(f'swapped {dels}D with {inss}I at pos {i}')
+
+    return cigar
 
 
 
@@ -244,6 +300,9 @@ def bases_to_int(seq):
         int_seq[i] = cfg.base_dict[ seq[i] ]
     return int_seq
 
+def int_to_bases(int_seq):
+    return ''.join([cfg.bases[i] for i in int_seq])
+
 def cig_to_int(cig):
     int_cig = np.zeros(len(cig), dtype=np.uint8)
     for i in range(len(cig)):
@@ -252,6 +311,21 @@ def cig_to_int(cig):
 
 def int_to_cig(int_cig):
     return ''.join([cfg.cigars[i] for i in int_cig])
+
+# @cython.boundscheck(False)
+# @cython.wraparound(False)
+cdef same_cigar(char[::1] cig1, char[::1] cig2):
+    cdef int cig1_len = len(cig1)
+    cdef int cig2_len = len(cig2)
+    cdef int i
+
+    if cig1_len != cig2_len:
+        return False
+    else:
+        for i in range(cig1_len):
+            if cig1[i] != cig2[i]:
+                return False
+        return True
 
 
 cpdef standardize_cigar(read_data):
@@ -271,12 +345,34 @@ cpdef standardize_cigar(read_data):
     cdef char[::1] int_ref = bases_to_int(ref)
     cdef char[::1] int_seq = bases_to_int(seq)
 
-    cdef int diff = 1
-    while diff > 0: # loop until CIGAR is stable
-        int_cig, diff1 = push_indels_left(int_cig, int_ref, D)
-        int_cig, diff2 = push_indels_left(int_cig, int_seq, I)
-        int_cig, diff3 = push_inss_thru_dels(int_cig)
-        diff = diff1 + diff2 + diff3 # logical OR (if any changed)
+    # push left, through
+    itr = 0
+    print(f"itr: {itr}")
+    print("push left")
+    int_cig = push_indels_left(int_cig, int_ref, D)
+    print("push thru")
+    int_cig = push_inss_thru_dels(int_cig)
+    print("push left")
+    int_cig = push_indels_left(int_cig, int_seq, I)
+    print("push thru")
+    int_cig = push_inss_thru_dels(int_cig)
+
+    while True:
+        itr += 1
+        print(f"itr: {itr}")
+        old_cig = int_cig[:]
+
+        # push right
+        int_cig = push_indels_right(int_cig, int_ref, D)
+        int_cig = push_indels_right(int_cig, int_seq, I)
+
+        # push left, through
+        int_cig = push_indels_left(int_cig, int_ref, D)
+        int_cig = push_inss_thru_dels(int_cig)
+        int_cig = push_indels_left(int_cig, int_seq, I)
+        int_cig = push_inss_thru_dels(int_cig)
+
+        if same_cigar(old_cig, int_cig): break
 
     new_cigar = int_to_cig(int_cig).replace('ID','M')
 
@@ -339,7 +435,7 @@ cpdef change_ref(read_cig_str, hap_cig_str, ref_str, read_str, hap_str):
     cdef int hap_ptr = 0
     cdef int i = 0
 
-    cdef char[::1] new_cig = np.zeros(len(read_cig)+len(hap_cig), dtype=np.uint8)
+    cdef char[::1] new_cig = np.zeros(len(read_cig)+len(hap_cig)+1, dtype=np.uint8)
     cdef int consume_read_cig = 0
     cdef int consume_hap_cig = 0
 
@@ -401,7 +497,7 @@ cpdef change_ref(read_cig_str, hap_cig_str, ref_str, read_str, hap_str):
             consume_read_cig = 1
             consume_hap_cig = 0
         elif hap_cig[cig_ptr_hap] == D and read_cig[cig_ptr_read] == D:
-            consume_read_cig = 0
+            consume_read_cig = 1
             consume_hap_cig = 1
         elif hap_cig[cig_ptr_hap] == D and read_cig[cig_ptr_read] == N:
             consume_read_cig = 0
@@ -417,7 +513,7 @@ cpdef change_ref(read_cig_str, hap_cig_str, ref_str, read_str, hap_str):
             consume_read_cig = 1
             consume_hap_cig = 0
         elif hap_cig[cig_ptr_hap] == N and read_cig[cig_ptr_read] == D:
-            consume_read_cig = 0
+            consume_read_cig = 1
             consume_hap_cig = 0
         elif hap_cig[cig_ptr_hap] == N and read_cig[cig_ptr_read] == N:
             return int_to_cig(new_cig[:i])
