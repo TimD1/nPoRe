@@ -130,19 +130,37 @@ def split_vcf(vcf_fn, vcf_out_pre=''):
             alleles2 = [record.alleles[0], record.alleles[gt[1]]]
             record2.alleles = alleles2
             vcf_out2.write(record2)
-            continue
 
-        if gt[0]:                    # hap1 variant
+        elif gt[0] and gt[1]:          # same hap1 and hap2 variant
+            record1 = record.copy()
+            for sample in record1.samples:
+                record1.samples[sample]['GT'] = ()
+            vcf_out1.write(record1)
+            vcf_out2.write(record1)
+
+        elif gt[0]:                    # hap1 variant only
             record1 = record.copy()
             for sample in record1.samples:
                 record1.samples[sample]['GT'] = ()
             vcf_out1.write(record1)
 
-        if gt[1]:                    # hap2 variant
+        elif gt[1]:                    # hap2 variant only
             record2 = record.copy()
             for sample in record2.samples:
                 record2.samples[sample]['GT'] = ()
             vcf_out2.write(record2)
+
+        elif not gt[0] and not gt[1] and record.alleles[0] == record.alleles[1]:
+            pass # ignore, same as ref
+
+        else: # PySAM error, consider it homozygous variant
+            # print(f"ERROR: no variant: {record.pos} {record.alleles} {gt}")
+            # TODO: file bug in PySam repo?
+            record1 = record.copy()
+            for sample in record1.samples:
+                record1.samples[sample]['GT'] = ()
+            vcf_out1.write(record1)
+            vcf_out2.write(record1)
 
         if gt[0] and not gt[1]: # 1|0 means phased, otherwise all are 0|1
             unphased = False
