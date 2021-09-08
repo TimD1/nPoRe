@@ -44,7 +44,7 @@ def fix_vcf(vcf):
 def main():
 
     print(f"> splitting vcf")
-    vcf1, vcf2 = split_vcf(cfg.args.vcf, cfg.args.out)
+    vcf1, vcf2 = split_vcf(cfg.args.vcf, cfg.args.out+"pre")
 
     print(f"> indexing vcfs")
     subprocess.run(['tabix', '-p', 'vcf', vcf1])
@@ -80,14 +80,16 @@ def main():
     # cigar2_data = pickle.load(open('cigar2_data.pkl', 'rb'))
     data = [cigar1_data, cigar2_data]
 
+    print(f"\n> saving debug output to bam")
+    hap_to_bam(cigar1_data, cfg.args.out+"pre")
+    hap_to_bam(cigar2_data, cfg.args.out+"pre")
+    subprocess.run(['samtools', 'index', f'{cfg.args.out}pre1.bam'])
+    subprocess.run(['samtools', 'index', f'{cfg.args.out}pre2.bam'])
+
     if cfg.args.std_cigar:
-        print(f"\n> chunking hap cigars")
-        data = chunk_cigars(data)
         print(f"\n> standardizing hap cigars")
-        with mp.Pool(1) as pool:
+        with mp.Pool() as pool:
             data = pool.map(standardize_cigar, data)
-        print(f"\n> stitching hap cigars")
-        data = stitch_cigars(data)
     cigar1_data = data[0]
     cigar2_data = data[1]
 
@@ -106,8 +108,8 @@ def main():
     subprocess.run(['samtools', 'index', f'{cfg.args.out}2.bam'])
 
     print('\n> generating standardized vcfs')
-    vcf1 = gen_vcf(cigar1_data, cfg.args.out+"_")
-    vcf2 = gen_vcf(cigar2_data, cfg.args.out+"_")
+    vcf1 = gen_vcf(cigar1_data, cfg.args.out)
+    vcf2 = gen_vcf(cigar2_data, cfg.args.out)
 
     print(f"> indexing vcfs")
     fix_vcf(vcf1)
