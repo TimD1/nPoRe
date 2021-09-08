@@ -9,3 +9,4 @@ build
 *.html
 venv*
 test/out*
+*.vcf

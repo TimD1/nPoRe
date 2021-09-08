@@ -43,23 +43,23 @@ def fix_vcf(vcf):
 
 def main():
 
-    # print(f"> splitting vcf")
-    # vcf1, vcf2 = split_vcf(cfg.args.vcf, cfg.args.out)
+    print(f"> splitting vcf")
+    vcf1, vcf2 = split_vcf(cfg.args.vcf, cfg.args.out)
 
-    # print(f"> indexing vcfs")
-    # subprocess.run(['tabix', '-p', 'vcf', vcf1])
-    # subprocess.run(['tabix', '-p', 'vcf', vcf2])
+    print(f"> indexing vcfs")
+    subprocess.run(['tabix', '-p', 'vcf', vcf1])
+    subprocess.run(['tabix', '-p', 'vcf', vcf2])
 
-    # print(f"> reading reference")
-    # ref = get_fasta(cfg.args.ref, cfg.args.contig)
+    print(f"> reading reference")
+    ref = get_fasta(cfg.args.ref, cfg.args.contig)
 
-    # print(f"> converting vcfs and ref to sequences")
-    # seq1, cig1 = apply_vcf(vcf1, ref)
-    # seq2, cig2 = apply_vcf(vcf2, ref)
+    print(f"> converting vcfs and ref to sequences")
+    seq1, cig1 = apply_vcf(vcf1, ref)
+    seq2, cig2 = apply_vcf(vcf2, ref)
 
-    # # package data
-    # cigar1_data = ("1", "chr19", 0, 0, cig1, "="*len(ref), ref, ref, seq1, 1)
-    # cigar2_data = ("2", "chr19", 0, 0, cig2, "="*len(ref), ref, ref, seq2, 2)
+    # package data
+    cigar1_data = ("1", "chr19", 0, 0, cig1, "="*len(ref), ref, ref, seq1, 1)
+    cigar2_data = ("2", "chr19", 0, 0, cig2, "="*len(ref), ref, ref, seq2, 2)
 
     # print("> calculating score matrices")
     # subs, hps = get_confusion_matrices()
@@ -75,16 +75,16 @@ def main():
     # pickle.dump(cigar1_data, open('cigar1_data.pkl', 'wb'))
     # pickle.dump(cigar2_data, open('cigar2_data.pkl', 'wb'))
 
-    print(f"> loading CIGAR data")
-    cigar1_data = pickle.load(open('cigar1_data.pkl', 'rb'))
-    cigar2_data = pickle.load(open('cigar2_data.pkl', 'rb'))
+    # print(f"> loading CIGAR data")
+    # cigar1_data = pickle.load(open('cigar1_data.pkl', 'rb'))
+    # cigar2_data = pickle.load(open('cigar2_data.pkl', 'rb'))
     data = [cigar1_data, cigar2_data]
 
     if cfg.args.std_cigar:
         print(f"\n> chunking hap cigars")
         data = chunk_cigars(data)
         print(f"\n> standardizing hap cigars")
-        with mp.Pool() as pool:
+        with mp.Pool(1) as pool:
             data = pool.map(standardize_cigar, data)
         print(f"\n> stitching hap cigars")
         data = stitch_cigars(data)
@@ -99,11 +99,11 @@ def main():
     # cigar1_data = pickle.load(open('cigar1_data.pkl', 'rb'))
     # cigar2_data = pickle.load(open('cigar2_data.pkl', 'rb'))
 
-    # print(f"> saving debug output to bam")
-    # hap_to_bam(cigar1_data, cfg.args.out)
-    # hap_to_bam(cigar2_data, cfg.args.out)
-    # subprocess.run(['samtools', 'index', f'{cfg.args.out}1.bam'])
-    # subprocess.run(['samtools', 'index', f'{cfg.args.out}2.bam'])
+    print(f"\n> saving debug output to bam")
+    hap_to_bam(cigar1_data, cfg.args.out)
+    hap_to_bam(cigar2_data, cfg.args.out)
+    subprocess.run(['samtools', 'index', f'{cfg.args.out}1.bam'])
+    subprocess.run(['samtools', 'index', f'{cfg.args.out}2.bam'])
 
     print('\n> generating standardized vcfs')
     vcf1 = gen_vcf(cigar1_data, cfg.args.out+"_")
