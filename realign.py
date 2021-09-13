@@ -37,9 +37,9 @@ def argparser():
     # boolean options
     parser.add_argument("--plot", action="store_true")
     parser.add_argument("--recalc_cms", action="store_true")
-    parser.add_argument("--min_snp_qual", type=int, default=0)
 
     parser.add_argument("--apply_vcf")
+    parser.add_argument("--min_qual", type=int, default=0)
     parser.add_argument("--std_cigar", action="store_true")
     parser.add_argument("--indels_only", action="store_true")
 
@@ -93,6 +93,7 @@ def main():
             _, _, _, _, _, cfg.args.hap2_cig, _, _, _, _ = \
                     standardize_cigar(("2", "chr19", 0, 0, "", cfg.args.hap2_cig, 
                         cfg.args.reference, "", cfg.args.hap2, 2))
+            print('')
         else:
             cfg.args.hap1_cig = cfg.args.hap1_cig.replace('X','M').replace('=','M')
             cfg.args.hap2_cig = cfg.args.hap2_cig.replace('X','M').replace('=','M')

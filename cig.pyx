@@ -336,8 +336,8 @@ cpdef standardize_cigar(read_data):
         old_cig = int_cig[:]
 
         # push right
-        # int_cig = push_indels_right(int_cig, int_ref, nshifts_buf, shiftlen_buf, D)
-        # int_cig = push_indels_right(int_cig, int_seq, nshifts_buf, shiftlen_buf, I)
+        int_cig = push_indels_right(int_cig, int_ref, nshifts_buf, shiftlen_buf, D)
+        int_cig = push_indels_right(int_cig, int_seq, nshifts_buf, shiftlen_buf, I)
 
         # push left, through
         int_cig = push_indels_left(int_cig, int_ref, nshifts_buf, shiftlen_buf, D)

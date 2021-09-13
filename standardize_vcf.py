@@ -61,13 +61,13 @@ def main():
     cigar1_data = ("1", "chr19", 0, 0, cig1, "="*len(ref), ref, ref, seq1, 1)
     cigar2_data = ("2", "chr19", 0, 0, cig2, "="*len(ref), ref, ref, seq2, 2)
 
-    # print("> calculating score matrices")
-    # subs, hps = get_confusion_matrices()
-    # cfg.args.sub_scores, cfg.args.hp_scores = calc_score_matrices(subs, hps)
+    print("> calculating score matrices")
+    subs, hps = get_confusion_matrices()
+    cfg.args.sub_scores, cfg.args.hp_scores = calc_score_matrices(subs, hps)
 
-    # print(f"> realigning hap sequences")
-    # with mp.Pool() as pool:
-    #     data = pool.map(realign_read, [cigar1_data, cigar2_data])
+    print(f"> realigning hap sequences")
+    with mp.Pool() as pool:
+        data = pool.map(realign_read, [cigar1_data, cigar2_data])
 
     # print(f"> saving CIGAR data")
     # cigar1_data = data[0]
@@ -78,13 +78,13 @@ def main():
     # print(f"> loading CIGAR data")
     # cigar1_data = pickle.load(open('cigar1_data.pkl', 'rb'))
     # cigar2_data = pickle.load(open('cigar2_data.pkl', 'rb'))
-    data = [cigar1_data, cigar2_data]
+    # data = [cigar1_data, cigar2_data]
 
-    print(f"\n> saving debug output to bam")
-    hap_to_bam(cigar1_data, cfg.args.out+"pre")
-    hap_to_bam(cigar2_data, cfg.args.out+"pre")
-    subprocess.run(['samtools', 'index', f'{cfg.args.out}pre1.bam'])
-    subprocess.run(['samtools', 'index', f'{cfg.args.out}pre2.bam'])
+    # print(f"\n> saving debug output to bam")
+    # hap_to_bam(cigar1_data, cfg.args.out+"pre")
+    # hap_to_bam(cigar2_data, cfg.args.out+"pre")
+    # subprocess.run(['samtools', 'index', f'{cfg.args.out}pre1.bam'])
+    # subprocess.run(['samtools', 'index', f'{cfg.args.out}pre2.bam'])
 
     if cfg.args.std_cigar:
         print(f"\n> standardizing hap cigars")
@@ -101,11 +101,11 @@ def main():
     # cigar1_data = pickle.load(open('cigar1_data.pkl', 'rb'))
     # cigar2_data = pickle.load(open('cigar2_data.pkl', 'rb'))
 
-    print(f"\n> saving debug output to bam")
-    hap_to_bam(cigar1_data, cfg.args.out)
-    hap_to_bam(cigar2_data, cfg.args.out)
-    subprocess.run(['samtools', 'index', f'{cfg.args.out}1.bam'])
-    subprocess.run(['samtools', 'index', f'{cfg.args.out}2.bam'])
+    # print(f"\n> saving debug output to bam")
+    # hap_to_bam(cigar1_data, cfg.args.out)
+    # hap_to_bam(cigar2_data, cfg.args.out)
+    # subprocess.run(['samtools', 'index', f'{cfg.args.out}1.bam'])
+    # subprocess.run(['samtools', 'index', f'{cfg.args.out}2.bam'])
 
     print('\n> generating standardized vcfs')
     vcf1 = gen_vcf(cigar1_data, cfg.args.out)
@@ -144,6 +144,7 @@ def argparser():
 
     parser.add_argument("--std_cigar", action="store_true")
     parser.add_argument("--indels_only", action="store_true")
+    parser.add_argument("--min_qual", type=int, default=0)
     return parser
 
 

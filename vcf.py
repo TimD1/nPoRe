@@ -40,7 +40,7 @@ def get_vcf_data():
     vcf_dict = {}
     print(f'\r    0 of {n} SNPs processed.', end='', flush=True)
     for i, snp in enumerate(snps):
-        if snp.qual > cfg.args.min_snp_qual:
+        if snp.qual > cfg.args.min_qual:
             gt = None
             for sample in snp.samples:
                 gts = snp.samples[sample]['GT']
@@ -283,6 +283,8 @@ def apply_vcf(vcf_fn, ref):
     for record in vcf.fetch(
             cfg.args.contig, cfg.args.contig_beg, cfg.args.contig_end):
         pos = record.pos - 1
+        if record.qual < cfg.args.min_qual:
+            continue
 
         if pos < ref_ptr: # overlapping indels, allow second if insertion
             indel_len = len(record.alleles[1]) - len(record.alleles[0])
