@@ -84,7 +84,7 @@ def get_vcf_data():
     return vcf_dict
 
 
-def split_vcf(vcf_fn, vcf_out_pre=''):
+def split_vcf(vcf_fn, vcf_out_pre='', filter_unphased=False):
     '''
     Splits phased VCF into hapVCFs.
     '''
@@ -140,12 +140,26 @@ def split_vcf(vcf_fn, vcf_out_pre=''):
 
         elif gt[0]:                    # hap1 variant only
             record1 = record.copy()
+            if filter_unphased:
+                phased_snp = False
+                for sample in record1.samples:
+                    if 'PS' in record1.samples[sample]:
+                        phased_snp = True
+                if not phased_snp: continue
+
             for sample in record1.samples:
                 record1.samples[sample]['GT'] = ()
             vcf_out1.write(record1)
 
         elif gt[1]:                    # hap2 variant only
             record2 = record.copy()
+            if filter_unphased:
+                phased_snp = False
+                for sample in record2.samples:
+                    if 'PS' in record2.samples[sample]:
+                        phased_snp = True
+                if not phased_snp: continue
+
             for sample in record2.samples:
                 record2.samples[sample]['GT'] = ()
             vcf_out2.write(record2)

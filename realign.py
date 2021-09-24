@@ -71,7 +71,7 @@ def main():
     if cfg.args.apply_vcf:
         print(f"\n> splitting vcf '{cfg.args.apply_vcf}'")
         vcf1, vcf2 = split_vcf(cfg.args.apply_vcf, 
-                f"{os.extsep.join(cfg.args.apply_vcf.split(os.extsep)[:-2])}")
+                f"{os.extsep.join(cfg.args.apply_vcf.split(os.extsep)[:-2])}", True)
 
         print(f"> indexing '{vcf1}' and\n        '{vcf2}'")
         subprocess.run(['tabix', '-p', 'vcf', vcf1])
@@ -105,6 +105,19 @@ def main():
                 get_refseq_positions(cfg.args.hap2_cig)
     else: print(' ')
 
+    cigar1_data = ("1", "chr19", 0, 0, cfg.args.hap1_cig, \
+            "="*len(cfg.args.reference), cfg.args.reference, \
+            cfg.args.reference, cfg.args.hap1, 1)
+    cigar2_data = ("2", "chr19", 0, 0, cfg.args.hap2_cig, \
+            "="*len(cfg.args.reference), cfg.args.reference, \
+            cfg.args.reference, cfg.args.hap2, 2)
+
+    print(f"\n> saving debug output to bam")
+    hap_to_bam(cigar1_data, cfg.args.out[:-9]+"hap")
+    hap_to_bam(cigar2_data, cfg.args.out[:-9]+"hap")
+    subprocess.run(['samtools', 'index', f'{cfg.args.out[:-9]}hap1.bam'])
+    subprocess.run(['samtools', 'index', f'{cfg.args.out[:-9]}hap2.bam'])
+
     print('> adding haplotype data to reads')
     with cfg.read_count.get_lock(): cfg.read_count.value = 0
     with mp.Pool() as pool:
@@ -120,15 +133,15 @@ def main():
         print(f"\r    0 reads realigned.", end='', flush=True)
         read_data = pool.map(realign_read, read_data)
 
-        with cfg.read_count.get_lock(): cfg.read_count.value = 0
-        if cfg.args.std_cigar:
-            print('\n> converting to standard INDEL format')
-            read_data = pool.map(standardize_cigar, read_data)
-
         if cfg.args.apply_vcf:
             print('\n> changing read basis hap->ref')
             with cfg.read_count.get_lock(): cfg.read_count.value = 0
             read_data = pool.map(from_haplotype_ref, read_data)
+
+        with cfg.read_count.get_lock(): cfg.read_count.value = 0
+        if cfg.args.std_cigar:
+            print('\n> converting to standard INDEL format')
+            read_data = pool.map(standardize_cigar, read_data)
 
     print(f"\n> saving results to '{cfg.args.out}'")
     write_results(read_data, cfg.args.out)

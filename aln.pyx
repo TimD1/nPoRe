@@ -96,10 +96,9 @@ def calc_score_matrices(subs, hps):
     # calculate substitution scores matrix
     sub_scores = np.zeros((cfg.nbases,cfg.nbases), dtype=np.float32)
     for i in range(1, cfg.nbases):
-        total = np.sum(subs[i-1])
         for j in range(1, cfg.nbases):
             if i != j:
-                sub_scores[i, j] = -np.log( (subs[i-1,j-1]+0.1) / total )
+                sub_scores[i, j] = -np.log( (subs[i,j]+0.01) / (np.sum(subs[i])+0.1) )
             else:
                 sub_scores[i, j] = 0
 

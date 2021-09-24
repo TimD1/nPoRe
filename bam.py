@@ -328,7 +328,7 @@ def plot_confusion_matrices(subs, hps):
     # plot homopolymer confusion matrices
     fig, ax = plt.subplots(2, 2, figsize=(30,30))
     cmaps = [plt.cm.Reds, plt.cm.Blues, plt.cm.Oranges, plt.cm.Greens]
-    for base, idx in enumerate(cfg.bases):
+    for idx, base in enumerate('ACGT'):
         x_idx, y_idx = idx % 2, idx // 2
         frac_matrix = hps[idx] / (1 + hps[idx].sum(axis=1))[:,np.newaxis]
         ax[x_idx, y_idx].matshow(frac_matrix, cmap=cmaps[idx], alpha=0.5)
