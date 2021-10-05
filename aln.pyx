@@ -13,85 +13,93 @@ from cig import *
 
 
 def fix_matrix_properties(scores, delta = 0.01):
-    ''' Modify matrix so scores follow expected pattern. '''
+    ''' Modify score matrix to adhere to the following properties:
+        - diagonals should all have same low penalty (correct call)
+        - a longer INDEL from same N-polymer should be penalized more
+        - a similar INDEL from a longer N-polymer should be penalized less
+    '''
 
-    # don't penalize diagonals
-    l = scores.shape[0]
-    for i in range(1, l):
-        scores[i,i] = min(scores[i,i], scores[i-1, i-1])
+    ns = scores.shape[0]
+    l = scores.shape[1]
+    INF = 10000
 
-    # more insertions should be more penalized
-    for j in range(1, l):
-        for i in range(j-1, -1, -1):
-            scores[i,j] = max(
-                    scores[i,j], 
-                    scores[i+1,j] + delta, 
-                    scores[i,j-1] + delta
-            )
+    for n in range(ns):
 
-    # more deletions should be more penalized
-    for i in range(1,l):
-        for j in range(i-1, -1, -1):
-            scores[i,j] = max(
-                    scores[i,j], 
-                    scores[i,j+1] + delta, 
-                    scores[i-1,j] + delta
-            )
+        # don't penalize diagonals
+        for i in range(1, l):
+            scores[n,i,i] = min(scores[n,i,i], scores[n,i-1,i-1])
 
-    # prefer insertions from longer homopolymers
-    best = np.ones(l) * 1000
-    for j in range(1,l):
-        for i in range(j-1, -1, -1):
-            ins_len = j - i
-            if scores[i,j] < best[ins_len]:
-                best[ins_len] = scores[i,j]
-                for total_ins_len in range(ins_len+1, l):
-                    best[total_ins_len] = min(
-                            best[total_ins_len], 
-                            best[ins_len] + best[total_ins_len-ins_len]
-                    )
-            else:
-                scores[i,j] = min(
-                        scores[i, j], 
-                        best[ins_len] - delta
+        # more insertions should be more penalized
+        for j in range(1, l):
+            for i in range(j-1, -1, -1):
+                scores[n,i,j] = max(
+                        scores[n,i,j], 
+                        scores[n,i+1,j] + delta, 
+                        scores[n,i,j-1] + delta
                 )
 
-    # prefer deletions from longer homopolymers
-    best = np.ones(l) * 1000
-    for i in range(1,l):
-        for j in range(i-1, -1, -1):
-            del_len = i - j
-            if scores[i,j] < best[del_len]:
-                best[del_len] = scores[i,j]
-                for total_del_len in range(del_len+1, l):
-                    best[total_del_len] = min(
-                            best[total_del_len], 
-                            best[del_len] + best[total_del_len-del_len]
-                    )
-            else:
-                scores[i,j] = min(
-                        scores[i, j], 
-                        best[del_len] - delta
+        # more deletions should be more penalized
+        for i in range(1,l):
+            for j in range(i-1, -1, -1):
+                scores[n,i,j] = max(
+                        scores[n,i,j], 
+                        scores[n,i,j+1] + delta, 
+                        scores[n,i-1,j] + delta
                 )
+
+        # prefer insertions from longer homopolymers
+        best = np.ones(l) * INF
+        for j in range(1,l):
+            for i in range(j-1, -1, -1):
+                ins_len = j - i
+                if scores[n,i,j] < best[ins_len]:
+                    best[ins_len] = scores[n,i,j]
+                    for total_ins_len in range(ins_len+1, l):
+                        best[total_ins_len] = min(
+                                best[total_ins_len], 
+                                best[ins_len] + best[total_ins_len-ins_len]
+                        )
+                else:
+                    scores[n,i,j] = min(
+                            scores[n,i,j], 
+                            best[ins_len] - delta
+                    )
+
+        # prefer deletions from longer homopolymers
+        best = np.ones(l) * INF
+        for i in range(1,l):
+            for j in range(i-1, -1, -1):
+                del_len = i - j
+                if scores[n,i,j] < best[del_len]:
+                    best[del_len] = scores[n,i,j]
+                    for total_del_len in range(del_len+1, l):
+                        best[total_del_len] = min(
+                                best[total_del_len], 
+                                best[del_len] + best[total_del_len-del_len]
+                        )
+                else:
+                    scores[n,i,j] = min(
+                            scores[n,i,j], 
+                            best[del_len] - delta
+                    )
 
     return scores
 
 
 
-def calc_score_matrices(subs, hps):
+def calc_score_matrices(subs, nps, inss, dels):
 
     # calculate homopolymer scores matrix
-    hps = np.sum(hps, axis=0)
-    hp_scores = np.zeros_like(hps, dtype=np.float32)
-    for ref_len in range(cfg.args.max_hp):
-        total = np.sum(hps[ref_len])
-        for call_len in range(cfg.args.max_hp):
-            count = int(hps[ref_len, call_len])
-            bias = 10
-            frac = (count + 0.01 + int(ref_len==call_len)*bias) / (total + 0.01*cfg.args.max_hp + bias)
-            hp_scores[ref_len, call_len] = -np.log(frac)
-    # hp_scores = ndimage.gaussian_filter(hp_scores, sigma=(2,2))
-    hp_scores = fix_matrix_properties(hp_scores)
+    np_scores = np.zeros_like(nps, dtype=np.float32)
+    for n in range(cfg.args.max_np):
+        for ref_len in range(cfg.args.max_np_len):
+            total = np.sum(nps[n, ref_len])
+            for call_len in range(cfg.args.max_np_len):
+                count = int(nps[n, ref_len, call_len])
+                bias = 10
+                frac = (count + 0.01 + int(ref_len==call_len)*bias) / (total + 0.01*cfg.args.max_np_len + bias)
+                np_scores[n, ref_len, call_len] = -np.log(frac)
+    np_scores = fix_matrix_properties(np_scores)
 
     # calculate substitution scores matrix
     sub_scores = np.zeros((cfg.nbases,cfg.nbases), dtype=np.float32)
@@ -102,87 +110,139 @@ def calc_score_matrices(subs, hps):
             else:
                 sub_scores[i, j] = 0
 
-    return sub_scores, hp_scores
+    ins_scores = np.zeros_like(inss, dtype=np.float32)
+    total = np.sum(inss)
+    for l in range(cfg.args.max_np_len):
+        frac = (inss[l] + 0.01) / (total + 0.01*cfg.args.max_np_len)
+        ins_scores[l] = -np.log(frac)
+
+    del_scores = np.zeros_like(dels, dtype=np.float32)
+    total = np.sum(dels)
+    for l in range(cfg.args.max_np_len):
+        frac = (dels[l] + 0.01) / (total + 0.01*cfg.args.max_np_len)
+        del_scores[l] = -np.log(frac)
+
+    return sub_scores, np_scores, ins_scores, del_scores
 
 
 
-def plot_hp_score_matrix(hps, prefix="score_mat"):
-
-    # confusion matrix
-    max_hp = 20
-    plt.figure(figsize=(15,15))
-    plt.matshow(hps[:max_hp,:max_hp], cmap=plt.cm.Reds, alpha=0.5)
-    for i in range(max_hp):
-        for j in range(max_hp):
-            plt.text(x=j, y=i, s=f'{hps[j,i]:.1f}', fontsize=7, va='center', ha='center')
-    plt.xlabel('Predicted')
-    plt.ylabel('Actual')
-    plt.title('Homopolymer Score Matrix')
-    plt.savefig(f'{cfg.args.stats_dir}/{prefix}_scores.png', dpi=300)
-    plt.close()
-
-    # surface plot
-    x, y = np.meshgrid(range(cfg.args.max_hp), range(cfg.args.max_hp))
-    fig = plt.figure(figsize=(20,10))
-    ax1 = fig.add_subplot(1,2,1, projection='3d')
-    ax2 = fig.add_subplot(1,2,2, projection='3d')
-    ax1.plot_trisurf(x.flatten(), -y.flatten(), hps.flatten(), cmap='RdYlGn_r', edgecolor='none')
-    ax2.plot_trisurf(-x.flatten(), -y.flatten(), hps.flatten(), cmap='RdYlGn_r', edgecolor='none')
-    plt.tight_layout()
-    plt.savefig(f'{cfg.args.stats_dir}/{prefix}_surface.png', dpi=200)
-    plt.close()
-
-    # contour plot
-    plt.figure(figsize=(15,15))
-    plot = plt.contour(hps, levels=10)
-    plt.xlabel('Homopolymer Length Called')
-    plt.ylabel('Actual Homopolymer Length')
-    plt.tight_layout()
-    plt.savefig(f'{cfg.args.stats_dir}/{prefix}_contour.png', dpi=200)
-    plt.close()
+def plot_np_score_matrices(nps, max_np_len = 40):
+    for n in range(cfg.args.max_np):
+        x, y = np.meshgrid(range(max_np_len), range(max_np_len))
+        fig = plt.figure(figsize=(20,10))
+        ax1 = fig.add_subplot(1,2,1, projection='3d')
+        ax2 = fig.add_subplot(1,2,2, projection='3d')
+        ax1.plot_trisurf(x.flatten(), -y.flatten(), 
+                nps[n,:max_np_len,:max_np_len].flatten(), 
+                cmap='RdYlGn_r', edgecolor='none')
+        ax2.plot_trisurf(-x.flatten(), -y.flatten(), 
+                nps[n,:max_np_len,:max_np_len].flatten(), 
+                cmap='RdYlGn_r', edgecolor='none')
+        plt.tight_layout()
+        plt.savefig(f'{cfg.args.stats_dir}/{n+1}-polymer_scores.png', dpi=200)
+        plt.close()
 
 
 
 @cython.boundscheck(False)
 @cython.wraparound(False)
-cdef int[:] get_hp_lengths(char[:] seq):
-    ''' Calculate HP length of substring starting at each index. '''
+cpdef int[:] get_ns(char[:] seq):
+    ''' Calculate N-polymer type and length of substring starting at each index. 
+         seq:     A T A T A T T T T T T T A A A
+         ns:      2 2 2 0 0 1 1 1 1 1 1 0 1 1 0
+         np_lens: 3 2 2 0 0 7 6 5 4 3 2 0 3 2 0
+    '''
 
     cdef int seq_len = len(seq)
-    hp_lens_buf = np.zeros(seq_len, dtype=np.intc)
-    cdef int[:] hp_lens = hp_lens_buf
-    cdef int start, stop
+    np_lens_buf = np.zeros(seq_len, dtype=np.intc)
+    ns_buf = np.zeros(seq_len, dtype=np.intc)
+    cdef int[:] np_lens = np_lens_buf
+    cdef int[:] ns = ns_buf
+    cdef int n, n_idx, np_repeat_len
+    cdef int seq_idx, seq_ptr
 
-    for start in range(seq_len):
-        for stop in range(start+1, seq_len):
-            if seq[stop] != seq[start]:
-                hp_lens[start] = stop - start
-                break
-    if seq_len:
-        hp_lens[seq_len-1] += 1
-    return hp_lens
+    for seq_idx in range(seq_len): # iterate over sequence
+
+        best_len = 0
+        for n in range(1, cfg.args.max_np+1): # check each length N-polymer
+
+            # get np repeat length at this position
+            np_repeat_len = 0
+            seq_ptr = seq_idx
+            while seq_ptr+n < seq_len and seq[seq_ptr] == seq[seq_ptr+n]:
+                seq_ptr += 1
+                if (seq_ptr-seq_idx) % n == 0: # finished n-polymer
+                    np_repeat_len += 1
+            if np_repeat_len: np_repeat_len += 1 # count first
+
+            # save best n and n-polymer repeat lengths
+            if n * np_repeat_len > ns[seq_idx] * np_lens[seq_idx]:
+                ns[seq_idx] = n
+                np_lens[seq_idx] = np_repeat_len
+
+    return ns
 
 
 
 @cython.boundscheck(False)
 @cython.wraparound(False)
-cdef float hp_indel_score(int ref_hp_len, int indel_len, float[:,:] hp_scores):
+cpdef int[:] get_np_lens(char[:] seq):
+    ''' Calculate N-polymer type and length of substring starting at each index. 
+         seq:     A T A T A T T T T T T T A A A
+         ns:      2 2 2 0 0 1 1 1 1 1 1 0 1 1 0
+         np_lens: 3 2 2 0 0 7 6 5 4 3 2 0 3 2 0
+    '''
+
+    cdef int seq_len = len(seq)
+    np_lens_buf = np.zeros(seq_len, dtype=np.intc)
+    ns_buf = np.zeros(seq_len, dtype=np.intc)
+    cdef int[:] np_lens = np_lens_buf
+    cdef int[:] ns = ns_buf
+    cdef int n, n_idx, np_repeat_len
+    cdef int seq_idx, seq_ptr
+
+    for seq_idx in range(seq_len): # iterate over sequence
+
+        best_len = 0
+        for n in range(1, cfg.args.max_np+1): # check each length N-polymer
+
+            # get np repeat length at this position
+            np_repeat_len = 0
+            seq_ptr = seq_idx
+            while seq_ptr+n < seq_len and seq[seq_ptr] == seq[seq_ptr+n]:
+                seq_ptr += 1
+                if (seq_ptr-seq_idx) % n == 0: # finished n-polymer
+                    np_repeat_len += 1
+            if np_repeat_len: np_repeat_len += 1 # count first
+
+            # save best n and n-polymer repeat lengths
+            if n * np_repeat_len > ns[seq_idx] * np_lens[seq_idx]:
+                ns[seq_idx] = n
+                np_lens[seq_idx] = np_repeat_len
+
+    return np_lens
+
+
+
+@cython.boundscheck(False)
+@cython.wraparound(False)
+cdef float np_score(int ref_np_len, int indel_len, float[:,:] np_scores):
 
     # error, don't allow
-    if ref_hp_len <= 0:
+    if ref_np_len <= 0:
         return 100
-    elif ref_hp_len + indel_len < 0:
+    elif ref_np_len + indel_len < 0:
         return 100
 
     # force lengths to fit in matrix
-    cdef int hp_scores_len = len(hp_scores)
-    if ref_hp_len > hp_scores_len-1:
-        ref_hp_len = hp_scores_len-1
+    cdef int np_scores_len = len(np_scores)
+    if ref_np_len > np_scores_len-1:
+        ref_np_len = np_scores_len-1
 
-    cdef int call_hp_len = ref_hp_len + indel_len
-    if call_hp_len > hp_scores_len-1:
-        call_hp_len = hp_scores_len-1
-    return hp_scores[ref_hp_len, call_hp_len]
+    cdef int call_hp_len = ref_np_len + indel_len
+    if call_hp_len > np_scores_len-1:
+        call_hp_len = np_scores_len-1
+    return np_scores[ref_np_len, call_hp_len]
 
 
 @cython.boundscheck(False)
@@ -285,7 +345,7 @@ cdef int[:] get_breaks(int chunk_size, int array_size, int[:] inss, int[:] dels)
 @cython.boundscheck(False)
 @cython.wraparound(False)
 cpdef align(char[::1] ref, char[::1] seq, str cigar, 
-        float[:,::1] sub_scores, float[:,::1] hp_scores, 
+        float[:,::1] sub_scores, float[:,::1] np_scores, 
         float indel_start=5, float indel_extend=2, int max_b_rows = 20001,
         int r = 30):
     ''' Perform alignment.  '''
@@ -298,7 +358,8 @@ cpdef align(char[::1] ref, char[::1] seq, str cigar,
     cdef int[:] inss = get_inss(cigar)
     cdef int[:] dels = get_dels(cigar)
     cdef int[:] breaks = get_breaks(max_b_rows, len(seq) + len(ref) + 1, inss, dels)
-    cdef int[:] ref_hp_lens = get_hp_lengths(ref)
+    cdef int[:] ref_nps = get_ns(ref)
+    cdef int[:] ref_np_lens = get_np_lens(ref)
 
     # define useful constants
     cdef int a_rows = len(seq) + 1
@@ -314,9 +375,9 @@ cpdef align(char[::1] ref, char[::1] seq, str cigar,
     cdef int typs = 5 # types
     cdef int MAT = 0  # match/substitution
     cdef int INS = 1  # insertion
-    cdef int LHP = 2  # lengthen homopolymer
+    cdef int NPI = 2  # lengthen homopolymer
     cdef int DEL = 3  # deletion
-    cdef int SHP = 4  # shorten homopolymer
+    cdef int NPD = 4  # shorten homopolymer
 
     cdef str aln = ''
     cdef str full_aln = ''
@@ -343,14 +404,14 @@ cpdef align(char[::1] ref, char[::1] seq, str cigar,
                 # precompute useful positions
                 a_row = b_to_a_row(b_row + brk, b_col, inss, dels, r)
                 a_col = b_to_a_col(b_row + brk, b_col, inss, dels, r)
-                ref_idx = a_col - 1
-                seq_idx = a_row - 1
                 b_top_row = a_to_b_row(a_row-1, a_col, inss, dels, r) - brk
                 b_top_col = a_to_b_col(a_row-1, a_col, inss, dels, r)
                 b_left_row = a_to_b_row(a_row, a_col-1, inss, dels, r) - brk
                 b_left_col = a_to_b_col(a_row, a_col-1, inss, dels, r)
                 b_diag_row = a_to_b_row(a_row-1, a_col-1, inss, dels, r) - brk
                 b_diag_col = a_to_b_col(a_row-1, a_col-1, inss, dels, r)
+                ref_idx = a_col - 1
+                seq_idx = a_row - 1
 
                 # skip cells out of range of this chunk of original "A" matrix
                 if a_row < inss[brk] or a_col < dels[brk] or \
@@ -364,7 +425,7 @@ cpdef align(char[::1] ref, char[::1] seq, str cigar,
                 # initialize first row/col of matrix A
                 elif a_row == inss[brk]:
                     for typ in range(typs):
-                        if typ == INS or typ == LHP: # don't allow
+                        if typ == INS or typ == NPI: # don't allow
                             val1 = indel_start + (100+indel_extend)*(a_col-dels[brk]-1)
                         else:
                             val1 = indel_start + indel_extend*(a_col-dels[brk]-1)
@@ -374,7 +435,7 @@ cpdef align(char[::1] ref, char[::1] seq, str cigar,
                     continue
                 elif a_col == dels[brk]:
                     for typ in range(typs):
-                        if typ == DEL or typ == SHP: # don't allow
+                        if typ == DEL or typ == NPD: # don't allow
                             val1 = indel_start + (100+indel_extend)*(a_row-inss[brk]-1)
                         else:
                             val1 = indel_start + indel_extend*(a_row-inss[brk]-1)
@@ -427,64 +488,69 @@ cpdef align(char[::1] ref, char[::1] seq, str cigar,
                     matrix[DEL, b_row, b_col, RUN] = run
 
 
-                # UPDATE LHP MATRIX
-                if seq_idx+2 < a_rows-1 and ref_idx+1 < a_cols-1 and \
-                        seq[seq_idx+1] == seq[seq_idx+2]: # only insert same base
+                # UPDATE NPI MATRIX
+                np_start = ref_idx == 0 and ref_nps[0] != 0 or \
+                        ref_nps[ref_idx] != ref_nps[ref_idx-1] or \
+                        ref_np_lens[ref_idx] > ref_np_lens[ref_idx-1]
 
-                    val1 = matrix[MAT, b_top_row, b_top_col, VAL] + \
-                            hp_indel_score(ref_hp_lens[ref_idx+1], 1, hp_scores)
-                    if a_row == inss[brk] + 1:
-                        run = 1
-                    else:
-                        run = <int>(matrix[LHP, b_top_row, b_top_col, RUN]) + 1
-                    val2 = matrix[LHP, 
-                            a_to_b_row(a_row-run, a_col, inss, dels, r) - brk, 
-                            a_to_b_col(a_row-run, a_col, inss, dels, r), VAL] + \
-                            hp_indel_score(ref_hp_lens[ref_idx+1], run, hp_scores)
-                    if val1 < val2: # start lengthen
-                        matrix[LHP, b_row, b_col, VAL] = val1
-                        matrix[LHP, b_row, b_col, TYP] = LHP
-                        matrix[LHP, b_row, b_col, RUN] = 1
-                    else: # continue lengthen
-                        matrix[LHP, b_row, b_col, VAL] = val2
-                        matrix[LHP, b_row, b_col, TYP] = LHP
-                        matrix[LHP, b_row, b_col, RUN] = run
+                # # UPDATE NPI MATRIX
+                # if seq_idx+2 < a_rows-1 and ref_idx+1 < a_cols-1 and \
+                #         seq[seq_idx+1] == seq[seq_idx+2]: # only insert same base
 
-                else: # don't allow insertion of different base
-                    val2 = matrix[MAT, b_diag_row, b_diag_col, VAL] + 100
-                    matrix[LHP, b_row, b_col, VAL] = val2
-                    matrix[LHP, b_row, b_col, TYP] = LHP
-                    matrix[LHP, b_row, b_col, RUN] = 0
+                #     val1 = matrix[MAT, b_top_row, b_top_col, VAL] + \
+                #             np_score(ref_np_lens[ref_idx+1], 1, np_scores)
+                #     if a_row == inss[brk] + 1:
+                #         run = 1
+                #     else:
+                #         run = <int>(matrix[NPI, b_top_row, b_top_col, RUN]) + 1
+                #     val2 = matrix[NPI, 
+                #             a_to_b_row(a_row-run, a_col, inss, dels, r) - brk, 
+                #             a_to_b_col(a_row-run, a_col, inss, dels, r), VAL] + \
+                #             np_score(ref_np_lens[ref_idx+1], run, np_scores)
+                #     if val1 < val2: # start lengthen
+                #         matrix[NPI, b_row, b_col, VAL] = val1
+                #         matrix[NPI, b_row, b_col, TYP] = NPI
+                #         matrix[NPI, b_row, b_col, RUN] = 1
+                #     else: # continue lengthen
+                #         matrix[NPI, b_row, b_col, VAL] = val2
+                #         matrix[NPI, b_row, b_col, TYP] = NPI
+                #         matrix[NPI, b_row, b_col, RUN] = run
+
+                # else: # don't allow insertion of different base
+                #     val2 = matrix[MAT, b_diag_row, b_diag_col, VAL] + 100
+                #     matrix[NPI, b_row, b_col, VAL] = val2
+                #     matrix[NPI, b_row, b_col, TYP] = NPI
+                #     matrix[NPI, b_row, b_col, RUN] = 0
 
 
-                # UPDATE SHP MATRIX
+                # UPDATE NPD MATRIX
                 if ref_idx+1 < a_cols-1 and \
                         ref[ref_idx+1] == ref[ref_idx]: # only delete same base
 
                     val1 = matrix[MAT, b_left_row, b_left_col, VAL] + \
-                        hp_indel_score(ref_hp_lens[ref_idx], -1, hp_scores)
+                        np_score(ref_np_lens[ref_idx], -1, np_scores)
                     if a_col == dels[brk] + 1:
                         run = 1
                     else:
-                        run = <int>(matrix[SHP, b_left_row, b_left_col, RUN] + 1)
-                    val2 = matrix[SHP, 
+                        run = <int>(matrix[NPD, b_left_row, b_left_col, RUN] + 1)
+                    val2 = matrix[NPD, 
                             a_to_b_row(a_row, a_col-run, inss, dels, r) - brk, 
                             a_to_b_col(a_row, a_col-run, inss, dels, r), VAL] + \
-                            hp_indel_score(ref_hp_lens[ref_idx], -run, hp_scores)
+                            np_score(ref_np_lens[ref_idx], -run, np_scores)
                     if val1 < val2: # start shorten
-                        matrix[SHP, b_row, b_col, VAL] = val1
-                        matrix[SHP, b_row, b_col, TYP] = SHP
-                        matrix[SHP, b_row, b_col, RUN] = 1
+                        matrix[NPD, b_row, b_col, VAL] = val1
+                        matrix[NPD, b_row, b_col, TYP] = NPD
+                        matrix[NPD, b_row, b_col, RUN] = 1
                     else: # continue shorten
-                        matrix[SHP, b_row, b_col, VAL] = val2
-                        matrix[SHP, b_row, b_col, TYP] = SHP
-                        matrix[SHP, b_row, b_col, RUN] = run
+                        matrix[NPD, b_row, b_col, VAL] = val2
+                        matrix[NPD, b_row, b_col, TYP] = NPD
+                        matrix[NPD, b_row, b_col, RUN] = run
 
                 else: # don't allow deleting different base
                     val2 = matrix[MAT, b_diag_row, b_diag_col, VAL] + 100
-                    matrix[SHP, b_row, b_col, VAL] = val2
-                    matrix[SHP, b_row, b_col, TYP] = SHP
-                    matrix[SHP, b_row, b_col, RUN] = 0
+                    matrix[NPD, b_row, b_col, VAL] = val2
+                    matrix[NPD, b_row, b_col, TYP] = NPD
+                    matrix[NPD, b_row, b_col, RUN] = 0
 
 
                 # UPDATE MAT MATRIX
@@ -499,7 +565,7 @@ cpdef align(char[::1] ref, char[::1] seq, str cigar,
                 matrix[MAT, b_row, b_col, RUN] = run
 
                 # end INDEL
-                for typ in [INS, LHP, DEL, SHP]:
+                for typ in [INS, NPI, DEL, NPD]:
                     val2 = matrix[typ, b_row, b_col, VAL]
                     if val2 < val1:
                         val1 = val2
@@ -526,16 +592,16 @@ cpdef align(char[::1] ref, char[::1] seq, str cigar,
             typ = <int>(matrix[MAT, b_row, b_col, TYP])
             run = <int>(matrix[MAT, b_row, b_col, RUN])
 
-            # Invalid SHPs and LHPs are run 0. They should never be reached during 
+            # Invalid NPDs and NPIs are run 0. They should never be reached during 
             # backtracking (due to high penalties), but leaving this here just-in-case
             if run < 1: run = 1
 
             op = ''
-            if typ == LHP or typ == INS:   # each move is an insertion
+            if typ == NPI or typ == INS:   # each move is an insertion
                 for i in range(run):
                     op += 'I'
                 a_row -= run
-            elif typ == SHP or typ == DEL: # each move is a deletion
+            elif typ == NPD or typ == DEL: # each move is a deletion
                 for i in range(run):
                     op += 'D'
                 a_col -= run

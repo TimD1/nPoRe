@@ -28,7 +28,8 @@ def argparser():
     parser.add_argument("--max_reads", type=int, default=0)
 
     # algorithm parameters
-    parser.add_argument("--max_hp", type=int, default=100)
+    parser.add_argument("--max_np", type=int, default=10)
+    parser.add_argument("--max_np_len", type=int, default=100)
     parser.add_argument("--chunk_width", type=int, default=10000)
 
     # path
@@ -50,20 +51,20 @@ def argparser():
 def main():
 
     os.makedirs(cfg.args.stats_dir, exist_ok=True)
-    subs, hps = get_confusion_matrices()
+    subs, nps, inss, dels = get_confusion_matrices()
 
     if cfg.args.plot:
         print("\n> plotting confusion matrices")
-        plot_confusion_matrices(subs, hps)
-        print("\n> plotting distributions")
-        plot_hp_len_dists(hps)
+        plot_confusion_matrices(subs, nps, inss, dels)
 
     print("\n> calculating score matrices")
-    cfg.args.sub_scores, cfg.args.hp_scores = calc_score_matrices(subs, hps)
+    cfg.args.sub_scores, cfg.args.np_scores, cfg.args.ins_scores, cfg.args.del_scores = \
+            calc_score_matrices(subs, nps, inss, dels)
 
     if cfg.args.plot:
         print("> plotting score matrices")
-        plot_hp_score_matrix(cfg.args.hp_scores)
+        plot_np_score_matrices(cfg.args.np_scores)
+        exit(0)
 
     print('> extracting read data from BAM')
     read_data = get_read_data(cfg.args.bam)

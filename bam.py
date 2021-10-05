@@ -282,13 +282,21 @@ def get_ranges(start, stop):
 
 
 def get_confusion_matrices():
-    ''' Load cached CMs if they exist. '''
+    ''' Load cached SUB/INDEL confusion matrices if they exist. 
+        Otherwise, calculate them from the provided BAM.
+    '''
     if not cfg.args.recalc_cms and \
             os.path.isfile(f'{cfg.args.stats_dir}/subs_cm.npy') and \
-            os.path.isfile(f'{cfg.args.stats_dir}/hps_cm.npy'):
+            os.path.isfile(f'{cfg.args.stats_dir}/nps_cm.npy') and \
+            os.path.isfile(f'{cfg.args.stats_dir}/inss_cm.npy') and \
+            os.path.isfile(f'{cfg.args.stats_dir}/dels_cm.npy'):
+
         print("> loading confusion matrices")
         return np.load(f'{cfg.args.stats_dir}/subs_cm.npy'), \
-                np.load(f'{cfg.args.stats_dir}/hps_cm.npy')
+                np.load(f'{cfg.args.stats_dir}/nps_cm.npy'), \
+                np.load(f'{cfg.args.stats_dir}/inss_cm.npy'), \
+                np.load(f'{cfg.args.stats_dir}/dels_cm.npy')
+
     else:
         print("> calculating confusion matrices")
         print(f"0 of {(cfg.args.contig_end-cfg.args.contig_beg)//cfg.args.chunk_width} chunks processed"
@@ -298,76 +306,111 @@ def get_confusion_matrices():
             results = list(pool.map(calc_confusion_matrices, ranges))
 
         # sum results
-        sub_cms, hp_cms = list(map(np.array, zip(*results)))
+        sub_cms, np_cms, ins_cms, del_cms = list(map(np.array, zip(*results)))
         subs = np.sum(sub_cms, axis=0)
-        hps = np.sum(hp_cms, axis=0)
+        nps = np.sum(np_cms, axis=0)
+        inss = np.sum(ins_cms, axis=0)
+        dels = np.sum(del_cms, axis=0)
 
         # cache results
         np.save(f'{cfg.args.stats_dir}/subs_cm', subs)
-        np.save(f'{cfg.args.stats_dir}/hps_cm', hps)
+        np.save(f'{cfg.args.stats_dir}/nps_cm', nps)
+        np.save(f'{cfg.args.stats_dir}/inss_cm', inss)
+        np.save(f'{cfg.args.stats_dir}/dels_cm', dels)
 
-        return subs, hps
-
-
-
-def plot_hp_len_dists(hps):
-    hps = np.sum(hps, axis=0)
-    for l in range(cfg.args.max_hp):
-        fig, ax = plt.subplots(1, 1, figsize=(10,10))
-        hp_lens = hps[l, :] / (1 + np.sum(hps[l, :]))
-        ax.step(range(cfg.args.max_hp), hp_lens, alpha=0.5, color='r')
-        ax.set_title(str(l))
-        plt.tight_layout()
-        plt.savefig(f'{cfg.args.stats_dir}/hp{l}_dist.png', dpi=200)
-        plt.close()
+        return subs, nps, inss, dels
 
 
 
-def plot_confusion_matrices(subs, hps):
+def plot_confusion_matrices(subs, nps, inss, dels, max_np_len = 20):
+    ''' Generate confusion matrix plots for each n-polymer, substitutions, 
+        and INDELs.
+    '''
 
     # plot homopolymer confusion matrices
-    fig, ax = plt.subplots(2, 2, figsize=(30,30))
-    cmaps = [plt.cm.Reds, plt.cm.Blues, plt.cm.Oranges, plt.cm.Greens]
-    for idx, base in enumerate('ACGT'):
-        x_idx, y_idx = idx % 2, idx // 2
-        frac_matrix = hps[idx] / (1 + hps[idx].sum(axis=1))[:,np.newaxis]
-        ax[x_idx, y_idx].matshow(frac_matrix, cmap=cmaps[idx], alpha=0.5)
-        for i in range(cfg.args.max_hp):
-            total = np.sum(hps[idx,i])
-            for j in range(cfg.args.max_hp):
-                count = int(hps[idx,i,j])
-                frac = (count + 0.1 + int(i == j)*10) / (total + 10 +  cfg.args.max_hp/10)
-                ax[x_idx, y_idx].text(x=j, y=i, 
+    for n in range(cfg.args.max_np):
+        fig, ax = plt.subplots(figsize=(max_np_len,max_np_len))
+        ax.matshow(nps[n,:max_np_len,:max_np_len] / \
+                (1 + np.sum(nps[n,:max_np_len,:max_np_len],axis=1)[:, np.newaxis]), 
+                cmap=plt.cm.Blues, alpha=0.5)
+
+        # add labels
+        for i in range(max_np_len):
+            total = np.sum(nps[n, i, :max_np_len])
+            for j in range(max_np_len):
+                count = int(nps[n, i, j])
+                frac = (count + 0.1 + int(i == j)*10) / (total + 10 + max_np_len*0.1)
+                ax.text(x=j, y=i, 
                         s=f'{count}\n{frac*100:.1f}%\n{-np.log(frac):.2f}', 
                         va='center', ha='center')
-        ax[x_idx, y_idx].set_xlabel('Predicted')
-        ax[x_idx, y_idx].set_ylabel('Actual')
-        ax[x_idx, y_idx].set_title(f'{base}')
-    plt.suptitle('Homopolymer Confusion Matrices')
-    plt.tight_layout()
-    plt.savefig(f'{cfg.args.stats_dir}/hps.png', dpi=300)
-    plt.close()
+
+        # formatting
+        plt.ylabel('Actual')
+        plt.xlabel('Predicted')
+        plt.title(f'{n+1}-Polymer Confusion Matrix')
+        ax.set_xticks(range(max_np_len))
+        ax.set_yticks(range(max_np_len))
+        plt.tight_layout()
+        plt.savefig(f'{cfg.args.stats_dir}/{n+1}-polymer_cm.png', dpi=300)
+        plt.close()
 
     # plot substitution confusion matrix
-    fig, ax = plt.subplots(figsize=(5,5))
+    fig, ax = plt.subplots(figsize=(cfg.nbases,cfg.nbases))
     ax.matshow(subs, cmap=plt.cm.Greys, alpha=0.5)
+
+    # add labels
     for i in range(cfg.nbases):
         total = np.sum(subs[i])
         for j in range(cfg.nbases):
             count = int(subs[i,j])
-            frac = (count + 0.1 + int(i==j)*10) / (total + 10 + cfg.args.max_hp/10)
-            ax.text(x=j, y=i, 
-                    s=f'{count}\n{frac*100:.1f}%\n{-np.log(frac):.2f}', 
-                    va='center', ha='center')
-    plt.xlabel('Predicted')
+            frac = (count + 0.1 + int(i==j)*10) / (total + 10 + max_np_len*0.1)
+            ax.text(x = j, y = i, 
+                    s = f'{count}\n{frac*100:.1f}%\n{-np.log(frac):.2f}', 
+                    va = 'center', ha = 'center')
+
+    # formatting
     plt.ylabel('Actual')
+    plt.xlabel('Predicted')
     ax.set_xticks(range(cfg.nbases))
     ax.set_xticklabels(cfg.bases)
     ax.set_yticks(range(cfg.nbases))
     ax.set_yticklabels(cfg.bases)
-    plt.title(f'Substitutions CM')
+    plt.title(f'Substitutions Confusion Matrix')
     plt.tight_layout()
-    plt.savefig(f'{cfg.args.stats_dir}/subs.png', dpi=300)
+    plt.savefig(f'{cfg.args.stats_dir}/subs_cm.png', dpi=300)
+    plt.close()
+
+
+    fig, ax = plt.subplots(2, 1, figsize=(max_np_len,5))
+    ax[0].matshow(inss[np.newaxis,:max_np_len], cmap=plt.cm.Greens, alpha=0.5)
+    ax[1].matshow(dels[np.newaxis,:max_np_len], cmap=plt.cm.Reds, alpha=0.5)
+
+    # add labels
+    total = np.sum(inss)
+    for i in range(max_np_len):
+        count = int(inss[i])
+        frac = (count + 0.1 + int(i == j)*10) / (total + 10 + max_np_len*0.1)
+        ax[0].text(x=i, y=0, 
+                s=f'{count}\n{frac*100:.1f}%\n{-np.log(frac):.2f}', 
+                va='center', ha='center')
+    total = np.sum(dels)
+    for i in range(max_np_len):
+        count = int(dels[i])
+        frac = (count + 0.1 + int(i == j)*10) / (total + 10 + max_np_len*0.1)
+        ax[1].text(x=i, y=0, 
+                s=f'{count}\n{frac*100:.1f}%\n{-np.log(frac):.2f}', 
+                va='center', ha='center')
+
+    # formatting
+    ax[0].set_ylabel('INSs')
+    ax[1].set_ylabel('DELs')
+    ax[0].set_xticks(range(max_np_len))
+    ax[1].set_xticks(range(max_np_len))
+    ax[0].set_yticks([])
+    ax[1].set_yticks([])
+    plt.suptitle(f'INDEL Confusion Matrices')
+    plt.tight_layout()
+    plt.savefig(f'{cfg.args.stats_dir}/indels_cm.png', dpi=300)
     plt.close()
 
 
@@ -377,7 +420,9 @@ def calc_confusion_matrices(range_tuple):
 
     # initialize results matrices
     subs = np.zeros((cfg.nbases, cfg.nbases))
-    hps = np.zeros((cfg.nbases, cfg.args.max_hp, cfg.args.max_hp))
+    nps = np.zeros((cfg.args.max_np, cfg.args.max_np_len, cfg.args.max_np_len))
+    inss = np.zeros((cfg.args.max_np_len))
+    dels = np.zeros((cfg.args.max_np_len))
 
     # check that BAM exists, initialize
     try:
@@ -386,20 +431,22 @@ def calc_confusion_matrices(range_tuple):
         print(f"ERROR: BAM file '{cfg.args.bam}' not found.")
         exit(1)
 
-    # get contig length (for pysam iteration)
-    try:
-        contig_idx = list(bam.references).index(cfg.args.contig)
-        contig_len = bam.lengths[contig_idx]
-    except ValueError:
-        print(f"ERROR: contig '{cfg.args.contig}' not found in '{bam}'.")
-        exit(1)
-
     # iterate over all reference positions
     window_start, window_end = range_tuple
     for read in bam.fetch(cfg.args.contig, window_start, window_end):
 
-        ref = read.get_reference_sequence().upper() \
-                [max(0, window_start-read.reference_start) : window_end-read.reference_start]
+        # get reference, precalculate n-polymer stats
+        try:
+            ref = read.get_reference_sequence().upper() \
+                    [max(0, window_start-read.reference_start) : window_end-read.reference_start]
+        except TypeError: 
+            # throwing error due to NoneType, checking for None fails...
+            continue
+        int_ref = np.zeros(len(ref), dtype=np.uint8)
+        for i in range(len(ref)): 
+            int_ref[i] = cfg.base_dict[ref[i]]
+        ref_ns = get_ns(int_ref)
+        ref_np_lens = get_np_lens(int_ref)
 
         # find read substring overlapping region
         cigar_types = [ c[0] for c in read.cigartuples ]
@@ -409,6 +456,7 @@ def calc_confusion_matrices(range_tuple):
         prev_cigar = None
         prev_count = 0
 
+        # walk along reference, keeping stats
         while ref_idx < window_end and ref_idx < read.reference_end:
 
             read_move, ref_move = None, None
@@ -441,33 +489,43 @@ def calc_confusion_matrices(range_tuple):
                 print(f"ERROR: unexpected CIGAR type for {read.query_name}")
                 exit(1)
 
-            if ref_idx >= read_start:
-                # update homopolymer confusion matrix
-                hp_ptr = ref_idx - read_start
+            if ref_idx > read_start and cigar != Cigar.S and cigar != Cigar.H:
 
-                hp_off_end = (hp_ptr+1) >= len(ref) # read ended prematurely, not INDEL
-                if not hp_off_end:
-                    # read just started, or new base seen (starting new HP)
-                    hp_start = (hp_ptr == 0) or ref[hp_ptr] != ref[hp_ptr-1]
-                    if hp_start and cigar != Cigar.S and cigar != Cigar.H: 
-                        while (not hp_off_end) and ref[hp_ptr] == ref[hp_ptr+1]: # get homopolymer length
-                            hp_ptr += 1
-                            hp_off_end = hp_ptr+1 >= len(ref)
+                # update SUB matrix
+                if ref_move and read_move and ref[ref_idx-read_start] != 'N':
+                    subs[ cfg.base_dict[ref[ref_idx-read_start]], 
+                          cfg.base_dict[read.query_sequence[read_idx]]] += 1
 
-                        if not hp_off_end: # full HP in read
-                            hp_len = hp_ptr+1 - (ref_idx-read_start)
+                # update INS matrix, start of ins
+                if cigar == Cigar.I and cigar != prev_cigar:
+                    inss[min(count, cfg.args.max_np_len-1)] += 1
+                else:
+                    inss[0] += 1
 
-                            # calculate INDEL length (if present)
-                            indel = 0
-                            if prev_cigar == Cigar.I:
-                                indel = prev_count
-                            elif cigar == Cigar.D:
-                                indel = -count
+                # update DEL matrix, start of del
+                if cigar == Cigar.D and cigar != prev_cigar:
+                    dels[min(count, cfg.args.max_np_len-1)] += 1
+                else:
+                    dels[0] += 1
 
-                            # only do stats on homopolymers which fit in confusion mat
-                            if not (hp_len >= cfg.args.max_hp or hp_len+indel < 0 or \
-                                    hp_len+indel >= cfg.args.max_hp):
-                                hps[cfg.bases[ref[ref_idx-read_start]], hp_len, hp_len+indel] += 1
+                n = ref_ns[ref_idx-read_start]
+                prev_n = ref_ns[ref_idx-read_start-1]
+                np_len = ref_np_lens[ref_idx-read_start]
+                prev_np_len = ref_np_lens[ref_idx-read_start-1]
+
+                # update N-POLYMER matrix, start of np
+                if n and (n != prev_n or np_len > prev_np_len):
+
+                    if prev_cigar == Cigar.I and prev_count % n == 0:
+                        if read.query_sequence[read_idx-prev_count:read_idx] == \
+                                ref[ref_idx-read_start:ref_idx-read_start+n] * int(prev_count/n):
+                            indel = int(prev_count / n)
+                    elif cigar == Cigar.D and count % n == 0:
+                        indel = - int(min(np_len, count / n))
+                    else:
+                        indel = 0
+
+                    nps[n-1, np_len, np_len+indel] += 1
 
             # store previous action (to detect indels directly prior to HP)
             if cigar != prev_cigar:
@@ -477,10 +535,6 @@ def calc_confusion_matrices(range_tuple):
             # shift reference index by one base or deleted section
             if ref_move:
                 if read_move:
-                    if ref_idx >= read_start:
-                        if ref[ref_idx-read_start] != 'N':
-                            subs[ cfg.bases[ref[ref_idx-read_start]], 
-                                  cfg.bases[read.query_sequence[read_idx]]] += 1
                     ref_idx += 1
                 else:
                     ref_idx += count
@@ -503,4 +557,4 @@ def calc_confusion_matrices(range_tuple):
             f"{(cfg.args.contig_end-cfg.args.contig_beg)//cfg.args.chunk_width} chunks processed"
             f" ({cfg.args.contig}:{cfg.args.contig_beg}:{cfg.args.contig_end}).", end='', flush=True)
 
-    return subs, hps
+    return subs, nps, inss, dels
