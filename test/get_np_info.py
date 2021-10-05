@@ -6,7 +6,7 @@ currentdir = os.path.dirname(os.path.realpath(__file__))
 parentdir = os.path.dirname(currentdir)
 sys.path.append(parentdir)
 
-from aln import get_ns, get_np_lens
+from aln import get_np_info
 import cfg
 
 # create test cases
@@ -17,13 +17,17 @@ seqs.append("ACGATCTCTAGGCAGTTAGCCGAGCAG")
 seqs.append("ACCGGCGCAGCAGCAGCAG")
 seqs.append("TATATATATGCGCGCGGGGATATA")
 
-def print_results(seq, ns, np_lens):
-    print("\nseq:      ", end="")
+def print_results(seq, np_info):
+    print("\nseq:    ", end="")
     print("  ".join([base for base in seq]))
-    print("ns:      ", end="")
-    print(" ".join([f"{n:2}" for n in ns]))
-    print("np_lens: ", end="")
-    print(" ".join([f"{l:2}" for l in np_lens]))
+    print("N:     ", end="")
+    print(" ".join([f"{i:2}" for i in np_info[0]]))
+    print("MAX:   ", end="")
+    print(" ".join([f"{i:2}" for i in np_info[1]]))
+    print("RPT:   ", end="")
+    print(" ".join([f"{i:2}" for i in np_info[2]]))
+    print("IDX:   ", end="")
+    print(" ".join([f"{i:2}" for i in np_info[3]]))
 
 
 def main():
@@ -32,16 +36,15 @@ def main():
         int_seq = np.zeros(len(seq), dtype=np.uint8)
         for i in range(len(seq)): 
             int_seq[i] = cfg.base_dict[seq[i]]
-        ns = get_ns(int_seq)
-        np_lens = get_np_lens(int_seq)
-        print_results(seq, ns, np_lens)
+        np_info = get_np_info(int_seq)
+        print_results(seq, np_info)
 
 def argparser():
     parser = argparse.ArgumentParser(
             formatter_class = argparse.ArgumentDefaultsHelpFormatter,
             add_help = False
     )
-    parser.add_argument("--max_n", type=int, default=10)
+    parser.add_argument("--max_np", type=int, default=10)
     return parser
 
 

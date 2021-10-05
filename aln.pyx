@@ -146,20 +146,40 @@ def plot_np_score_matrices(nps, max_np_len = 40):
 
 @cython.boundscheck(False)
 @cython.wraparound(False)
-cpdef int[:] get_ns(char[:] seq):
-    ''' Calculate N-polymer type and length of substring starting at each index. 
-         seq:     A T A T A T T T T T T T A A A
-         ns:      2 2 2 0 0 1 1 1 1 1 1 0 1 1 0
-         np_lens: 3 2 2 0 0 7 6 5 4 3 2 0 3 2 0
+cpdef int[:,:] get_np_info(char[:] seq):
+    ''' Calculate N-polymer information. 
+
+         seq:     A T A T A T T T T T T T A A A G C
+
+         np_info:
+         N:       2 2 2 2 2 1 1 1 1 1 1 1 1 1 1 0 0
+         MAX:     3 3 3 3 3 7 7 7 7 7 7 7 3 3 3 0 0
+         RPT:     0 0 1 1 2 0 1 2 3 4 5 6 0 1 2 0 0
+         IDX:     0 1 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0
+         
+         N = number of bases in repeated sequence
+         MAX = number of times the sequence is repeated
+         RPT = 0-based count of which repeat the current base is within
+         IDX = 0-based index of current base within repeated sequence of length N
+
+         Explanation:
+         3(AT), 7(T), 3(A) with some overlap. A sequence must repeat at least 
+         twice to be considered an n-polymer. Bases are considered part of 
+         the longest repeat in which they're included (N * MAX).
+
     '''
 
     cdef int seq_len = len(seq)
-    np_lens_buf = np.zeros(seq_len, dtype=np.intc)
-    ns_buf = np.zeros(seq_len, dtype=np.intc)
-    cdef int[:] np_lens = np_lens_buf
-    cdef int[:] ns = ns_buf
-    cdef int n, n_idx, np_repeat_len
+    np_info_buf = np.zeros((4, seq_len), dtype=np.intc)
+    cdef int[:,:] np_info = np_info_buf
+    cdef int n, n_idx, np_repeat_len, pos, rpt, idx
     cdef int seq_idx, seq_ptr
+
+    # define constant values for indexing into `np_info` array
+    cdef int N = 0
+    cdef int MAX = 1
+    cdef int RPT = 2
+    cdef int IDX = 3
 
     for seq_idx in range(seq_len): # iterate over sequence
 
@@ -175,52 +195,17 @@ cpdef int[:] get_ns(char[:] seq):
                     np_repeat_len += 1
             if np_repeat_len: np_repeat_len += 1 # count first
 
-            # save best n and n-polymer repeat lengths
-            if n * np_repeat_len > ns[seq_idx] * np_lens[seq_idx]:
-                ns[seq_idx] = n
-                np_lens[seq_idx] = np_repeat_len
+            # save n-polymer info
+            if n * np_repeat_len > np_info[N, seq_idx] * np_info[MAX, seq_idx]:
+                for rpt in range(np_repeat_len):
+                    for idx in range(n):
+                        pos = seq_idx + rpt*n + idx
+                        np_info[N, pos] = n
+                        np_info[MAX, pos] = np_repeat_len
+                        np_info[RPT, pos] = rpt
+                        np_info[IDX, pos] = idx
 
-    return ns
-
-
-
-@cython.boundscheck(False)
-@cython.wraparound(False)
-cpdef int[:] get_np_lens(char[:] seq):
-    ''' Calculate N-polymer type and length of substring starting at each index. 
-         seq:     A T A T A T T T T T T T A A A
-         ns:      2 2 2 0 0 1 1 1 1 1 1 0 1 1 0
-         np_lens: 3 2 2 0 0 7 6 5 4 3 2 0 3 2 0
-    '''
-
-    cdef int seq_len = len(seq)
-    np_lens_buf = np.zeros(seq_len, dtype=np.intc)
-    ns_buf = np.zeros(seq_len, dtype=np.intc)
-    cdef int[:] np_lens = np_lens_buf
-    cdef int[:] ns = ns_buf
-    cdef int n, n_idx, np_repeat_len
-    cdef int seq_idx, seq_ptr
-
-    for seq_idx in range(seq_len): # iterate over sequence
-
-        best_len = 0
-        for n in range(1, cfg.args.max_np+1): # check each length N-polymer
-
-            # get np repeat length at this position
-            np_repeat_len = 0
-            seq_ptr = seq_idx
-            while seq_ptr+n < seq_len and seq[seq_ptr] == seq[seq_ptr+n]:
-                seq_ptr += 1
-                if (seq_ptr-seq_idx) % n == 0: # finished n-polymer
-                    np_repeat_len += 1
-            if np_repeat_len: np_repeat_len += 1 # count first
-
-            # save best n and n-polymer repeat lengths
-            if n * np_repeat_len > ns[seq_idx] * np_lens[seq_idx]:
-                ns[seq_idx] = n
-                np_lens[seq_idx] = np_repeat_len
-
-    return np_lens
+    return np_info
 
 
 
