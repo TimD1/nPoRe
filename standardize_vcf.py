@@ -62,8 +62,8 @@ def main():
     cigar2_data = ("2", "chr19", 0, 0, cig2, "="*len(ref), ref, ref, seq2, 2)
 
     print("> calculating score matrices")
-    subs, hps = get_confusion_matrices()
-    cfg.args.sub_scores, cfg.args.hp_scores = calc_score_matrices(subs, hps)
+    subs, nps, inss ,dels = get_confusion_matrices()
+    cfg.args.sub_scores, cfg.args.np_scores, cfg.args.ins_scores, cfg.args.del_scores = calc_score_matrices(subs, nps, inss, dels)
 
     print(f"> realigning hap sequences")
     with mp.Pool() as pool:
@@ -139,7 +139,8 @@ def argparser():
     parser.add_argument("--stats_dir", default="./stats")
     parser.add_argument("--recalc_cms", action="store_true")
 
-    parser.add_argument("--max_hp", type=int, default=100)
+    parser.add_argument("--max_np", type=int, default=10)
+    parser.add_argument("--max_np_len", type=int, default=100)
     parser.add_argument("--chunk_width", type=int, default=10000)
 
     parser.add_argument("--std_cigar", action="store_true")

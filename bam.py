@@ -160,7 +160,7 @@ def realign_read(read_data):
     #         f'\tref:{len(hap_ref)} {ref_len(cigar)}')
 
     # align
-    new_cigar = align(int_ref, int_seq, cigar, cfg.args.sub_scores, cfg.args.hp_scores)
+    new_cigar = align(int_ref, int_seq, cigar, cfg.args.sub_scores, cfg.args.np_scores)
     # print(  f'aln read:{read_id:8s}'
     #         f'\tseq:{len(seq)} {seq_len(cigar)}->{seq_len(new_cigar)}'
     #         f'\tref:{len(hap_ref)} {ref_len(cigar)}->{ref_len(new_cigar)}')
@@ -445,8 +445,12 @@ def calc_confusion_matrices(range_tuple):
         int_ref = np.zeros(len(ref), dtype=np.uint8)
         for i in range(len(ref)): 
             int_ref[i] = cfg.base_dict[ref[i]]
-        ref_ns = get_ns(int_ref)
-        ref_np_lens = get_np_lens(int_ref)
+
+        np_info = get_np_info(int_ref)
+        RPTS = 0
+        RPT = 1
+        N = 2
+        IDX = 3
 
         # find read substring overlapping region
         cigar_types = [ c[0] for c in read.cigartuples ]
@@ -508,24 +512,28 @@ def calc_confusion_matrices(range_tuple):
                 else:
                     dels[0] += 1
 
-                n = ref_ns[ref_idx-read_start]
-                prev_n = ref_ns[ref_idx-read_start-1]
-                np_len = ref_np_lens[ref_idx-read_start]
-                prev_np_len = ref_np_lens[ref_idx-read_start-1]
+                n = np_info[N, ref_idx-read_start]
+                np_len = np_info[RPTS, ref_idx-read_start]
+                idx = np_info[IDX, ref_idx-read_start]
+                rpt = np_info[RPT, ref_idx-read_start]
+                prev_n = np_info[N, ref_idx-read_start-1]
+                prev_np_len = np_info[RPTS, ref_idx-read_start-1]
 
                 # update N-POLYMER matrix, start of np
-                if n and (n != prev_n or np_len > prev_np_len):
+                if n > 0 and rpt == 0 and idx == 0:
 
                     if prev_cigar == Cigar.I and prev_count % n == 0:
                         if read.query_sequence[read_idx-prev_count:read_idx] == \
-                                ref[ref_idx-read_start:ref_idx-read_start+n] * int(prev_count/n):
+                                ref[ref_idx-read_start:ref_idx-read_start+n] * \
+                                int(prev_count/n):
                             indel = int(prev_count / n)
                     elif cigar == Cigar.D and count % n == 0:
                         indel = - int(min(np_len, count / n))
                     else:
                         indel = 0
 
-                    nps[n-1, np_len, np_len+indel] += 1
+                    if np_len < cfg.args.max_np_len and np_len+indel<cfg.args.max_np_len:
+                        nps[n-1, np_len, np_len+indel] += 1
 
             # store previous action (to detect indels directly prior to HP)
             if cigar != prev_cigar:

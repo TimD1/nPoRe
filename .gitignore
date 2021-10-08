@@ -10,3 +10,4 @@ build
 venv*
 test/out*
 *.vcf*
+*.nfs*

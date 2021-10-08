@@ -126,8 +126,25 @@ def calc_score_matrices(subs, nps, inss, dels):
 
 
 
-def plot_np_score_matrices(nps, max_np_len = 40):
+def plot_np_score_matrices(nps, max_np_len = 20):
     for n in range(cfg.args.max_np):
+
+        # score matrix
+        plt.figure(figsize=(max_np_len,max_np_len))
+        plt.matshow(nps[n,:max_np_len, :max_np_len], cmap='RdYlGn_r',)
+        for i in range(max_np_len):
+            for j in range(max_np_len):
+                plt.text(x=j, y=i, s=f'{nps[n,i,j]:.1f}', fontsize=5, 
+                        va='center', ha='center')
+        plt.xlabel('Called')
+        plt.ylabel('Actual')
+        plt.xticks(range(max_np_len))
+        plt.yticks(range(max_np_len))
+        plt.title(f'{n+1}-Polymer Score Matrix')
+        plt.savefig(f'{cfg.args.stats_dir}/{n+1}-polymer_scores.png', dpi=300)
+        plt.close()
+
+        # surface plot
         x, y = np.meshgrid(range(max_np_len), range(max_np_len))
         fig = plt.figure(figsize=(20,10))
         ax1 = fig.add_subplot(1,2,1, projection='3d')
@@ -139,46 +156,47 @@ def plot_np_score_matrices(nps, max_np_len = 40):
                 nps[n,:max_np_len,:max_np_len].flatten(), 
                 cmap='RdYlGn_r', edgecolor='none')
         plt.tight_layout()
-        plt.savefig(f'{cfg.args.stats_dir}/{n+1}-polymer_scores.png', dpi=200)
+        plt.savefig(f'{cfg.args.stats_dir}/{n+1}-polymer_scores_surface.png', dpi=200)
         plt.close()
 
 
 
 @cython.boundscheck(False)
 @cython.wraparound(False)
+@cython.cdivision(True)
 cpdef int[:,:] get_np_info(char[:] seq):
     ''' Calculate N-polymer information. 
 
          seq:     A T A T A T T T T T T T A A A G C
 
          np_info:
-         N:       2 2 2 2 2 1 1 1 1 1 1 1 1 1 1 0 0
-         MAX:     3 3 3 3 3 7 7 7 7 7 7 7 3 3 3 0 0
+         RPTS:    3 3 3 3 3 7 7 7 7 7 7 7 3 3 3 0 0
          RPT:     0 0 1 1 2 0 1 2 3 4 5 6 0 1 2 0 0
+         N:       2 2 2 2 2 1 1 1 1 1 1 1 1 1 1 0 0
          IDX:     0 1 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0
          
+         RPTS = number of times the sequence is repeated
+         RPT = 0-based index of the current repeat
          N = number of bases in repeated sequence
-         MAX = number of times the sequence is repeated
-         RPT = 0-based count of which repeat the current base is within
-         IDX = 0-based index of current base within repeated sequence of length N
+         IDX = 0-based index of current base within repeat
 
          Explanation:
          3(AT), 7(T), 3(A) with some overlap. A sequence must repeat at least 
          twice to be considered an n-polymer. Bases are considered part of 
-         the longest repeat in which they're included (N * MAX).
+         the longest repeat in which they're included (N * RPTS).
 
     '''
 
     cdef int seq_len = len(seq)
     np_info_buf = np.zeros((4, seq_len), dtype=np.intc)
-    cdef int[:,:] np_info = np_info_buf
-    cdef int n, n_idx, np_repeat_len, pos, rpt, idx
+    cdef int[:,::1] np_info = np_info_buf
+    cdef int n, np_repeat_len, pos, rpt, idx
     cdef int seq_idx, seq_ptr
 
     # define constant values for indexing into `np_info` array
-    cdef int N = 0
-    cdef int MAX = 1
-    cdef int RPT = 2
+    cdef int RPTS = 0
+    cdef int RPT = 1
+    cdef int N = 2
     cdef int IDX = 3
 
     for seq_idx in range(seq_len): # iterate over sequence
@@ -196,13 +214,13 @@ cpdef int[:,:] get_np_info(char[:] seq):
             if np_repeat_len: np_repeat_len += 1 # count first
 
             # save n-polymer info
-            if n * np_repeat_len > np_info[N, seq_idx] * np_info[MAX, seq_idx]:
+            if n * np_repeat_len > np_info[N, seq_idx] * np_info[RPTS, seq_idx]:
                 for rpt in range(np_repeat_len):
                     for idx in range(n):
                         pos = seq_idx + rpt*n + idx
-                        np_info[N, pos] = n
-                        np_info[MAX, pos] = np_repeat_len
+                        np_info[RPTS, pos] = np_repeat_len
                         np_info[RPT, pos] = rpt
+                        np_info[N, pos] = n
                         np_info[IDX, pos] = idx
 
     return np_info
@@ -211,23 +229,24 @@ cpdef int[:,:] get_np_info(char[:] seq):
 
 @cython.boundscheck(False)
 @cython.wraparound(False)
-cdef float np_score(int ref_np_len, int indel_len, float[:,:] np_scores):
+cdef float np_score(int n, int ref_np_len, int indel_len, float[:,:,::1] np_scores, int max_np):
 
     # error, don't allow
     if ref_np_len <= 0:
         return 100
     elif ref_np_len + indel_len < 0:
         return 100
+    elif n < 1 or n > max_np:
+        return 100
 
     # force lengths to fit in matrix
-    cdef int np_scores_len = len(np_scores)
-    if ref_np_len > np_scores_len-1:
-        ref_np_len = np_scores_len-1
+    cdef int call_np_len = ref_np_len + indel_len
+    if ref_np_len > max_np-1:
+        ref_np_len = max_np-1
+    if call_np_len > max_np-1:
+        call_np_len = max_np-1
 
-    cdef int call_hp_len = ref_np_len + indel_len
-    if call_hp_len > np_scores_len-1:
-        call_hp_len = np_scores_len-1
-    return np_scores[ref_np_len, call_hp_len]
+    return np_scores[n-1, ref_np_len, call_np_len]
 
 
 @cython.boundscheck(False)
@@ -237,7 +256,7 @@ cdef int[:] get_inss(str cigar):
 
     cdef int cig_len = len(cigar)
     inss_buf = np.zeros(cig_len+1, dtype=np.intc)
-    cdef int[:] inss = inss_buf
+    cdef int[::1] inss = inss_buf
     cdef int i
 
     for i in range(cig_len):
@@ -256,7 +275,7 @@ cdef int[:] get_dels(str cigar):
 
     cdef int cig_len = len(cigar)
     dels_buf = np.zeros(cig_len+1, dtype=np.intc)
-    cdef int[:] dels = dels_buf
+    cdef int[::1] dels = dels_buf
     cdef int i
 
     for i in range(cig_len):
@@ -329,10 +348,25 @@ cdef int[:] get_breaks(int chunk_size, int array_size, int[:] inss, int[:] dels)
 
 @cython.boundscheck(False)
 @cython.wraparound(False)
+cdef int match(char[::1] A, char[::1] B):
+    cdef int i
+    if len(A) != len(B): 
+        return 0
+    else:
+        for i in range(len(A)):
+            if A[i] != B[i]:
+                return 0
+    return 1
+
+
+
+# @cython.boundscheck(False)
+# @cython.wraparound(False)
+# @cython.cdivision(True)
 cpdef align(char[::1] ref, char[::1] seq, str cigar, 
-        float[:,::1] sub_scores, float[:,::1] np_scores, 
-        float indel_start=5, float indel_extend=2, int max_b_rows = 20001,
-        int r = 30):
+        float[:,::1] sub_scores, float[:,:,::1] np_scores, 
+        float indel_start=5, float indel_extend=1, int max_b_rows = 20000,
+        int r = 30, int verbose=0):
     ''' Perform alignment.  '''
 
     # convert CIGAR so that each movement is row+1 or col+1, enables easy banding
@@ -343,14 +377,19 @@ cpdef align(char[::1] ref, char[::1] seq, str cigar,
     cdef int[:] inss = get_inss(cigar)
     cdef int[:] dels = get_dels(cigar)
     cdef int[:] breaks = get_breaks(max_b_rows, len(seq) + len(ref) + 1, inss, dels)
-    cdef int[:] ref_nps = get_ns(ref)
-    cdef int[:] ref_np_lens = get_np_lens(ref)
+    cdef int[:,:] np_info = get_np_info(ref)
 
     # define useful constants
     cdef int a_rows = len(seq) + 1
     cdef int a_cols = len(ref) + 1
     cdef int b_cols = 2*r + 1
     cdef int b_rows = -1
+
+    # n-polymer info indices
+    cdef int RPTS = 0
+    cdef int RPT = 1
+    cdef int N = 2
+    cdef int IDX = 3
 
     cdef int dims = 3 # dimensions in matrix
     cdef int VAL = 0  # value (alignment score)
@@ -366,13 +405,23 @@ cpdef align(char[::1] ref, char[::1] seq, str cigar,
 
     cdef str aln = ''
     cdef str full_aln = ''
-    cdef str op
-    matrix_buf = np.zeros((typs, max_b_rows, b_cols, dims), dtype=np.float32)
+    cdef str op, s
+    # for alignment offset purposes, M -> DI. Breaks are sometimes shifted by 1, 
+    # so that this DI doesn't cross the boundary of alignment chunks. 
+    # As a result, we must increase the matrix buffer size. (hence max_b_rows+1)
+    matrix_buf = np.zeros((typs, max_b_rows+1, b_cols, dims), dtype=np.float32)
     cdef float[:,:,:,::1] matrix = matrix_buf
+    # max single-move penalty is < 10, so a path with this penalty will never 
+    # be chosen. Still kept small enough so that len(seq)*INF < INT_MAX
+    cdef int INF = 100
 
-    cdef int b_row, b_col, a_row, a_col, ref_idx, seq_idx
+    cdef int b_row, b_col, a_row, a_col, ref_idx, seq_idx, row, col
     cdef int b_top_row, b_top_col, b_left_row, b_left_col, b_diag_row, b_diag_col
+    cdef int b_runleft_row, b_runleft_col, b_runup_row, b_runup_col
+    cdef int b_ndown_row, b_ndown_col, b_nright_row, b_nright_col
     cdef int run, typ, i, brk, next_brk, brk_idx
+    cdef int rpts, rpt, n, idx
+    cdef int max_np_len = cfg.args.max_np_len
     cdef float val1, val2
 
     # iterate over b matrix in chunks set by breakpoints
@@ -381,6 +430,22 @@ cpdef align(char[::1] ref, char[::1] seq, str cigar,
         next_brk = breaks[brk_idx+1]
         b_rows = next_brk - brk + 1
         matrix_buf.fill(0)
+
+        # initialize N-polymer matrices with invalid states
+        for b_row in range(b_rows):
+            for b_col in range(b_cols):
+                a_row = b_to_a_row(b_row + brk, b_col, inss, dels, r)
+                a_col = b_to_a_col(b_row + brk, b_col, inss, dels, r)
+                if a_row < inss[brk] or a_col < dels[brk] or \
+                        a_row > inss[next_brk] or a_col > dels[next_brk] or \
+                        b_col == 0 or b_col == 2*r:
+                    continue
+                matrix[NPI, b_row, b_col, VAL] = INF * (a_row-inss[brk] + a_col-dels[brk])
+                matrix[NPI, b_row, b_col, TYP] = MAT
+                matrix[NPI, b_row, b_col, RUN] = 0
+                matrix[NPD, b_row, b_col, VAL] = INF * (a_row-inss[brk] + a_col-dels[brk])
+                matrix[NPD, b_row, b_col, TYP] = MAT
+                matrix[NPD, b_row, b_col, RUN] = 0
 
         # calculate matrix chunk
         for b_row in range(b_rows):
@@ -403,154 +468,87 @@ cpdef align(char[::1] ref, char[::1] seq, str cigar,
                         a_row > inss[next_brk] or a_col > dels[next_brk]:
                     continue
 
-                # very first cell has no score (necessary to skip other elifs)
-                elif a_row == inss[brk] and a_col == dels[brk]:
-                    continue
-
-                # initialize first row/col of matrix A
-                elif a_row == inss[brk]:
-                    for typ in range(typs):
-                        if typ == INS or typ == NPI: # don't allow
-                            val1 = indel_start + (100+indel_extend)*(a_col-dels[brk]-1)
-                        else:
-                            val1 = indel_start + indel_extend*(a_col-dels[brk]-1)
-                        matrix[typ, b_row, b_col, VAL] = val1
-                        matrix[typ, b_row, b_col, TYP] = DEL
-                        matrix[typ, b_row, b_col, RUN] = a_col - dels[brk]
-                    continue
-                elif a_col == dels[brk]:
-                    for typ in range(typs):
-                        if typ == DEL or typ == NPD: # don't allow
-                            val1 = indel_start + (100+indel_extend)*(a_row-inss[brk]-1)
-                        else:
-                            val1 = indel_start + indel_extend*(a_row-inss[brk]-1)
-                        matrix[typ, b_row, b_col, VAL] = val1
-                        matrix[typ, b_row, b_col, TYP] = INS
-                        matrix[typ, b_row, b_col, RUN] = a_row - inss[brk]
-                    continue
-
                 # enforce new path remains within r cells of original path
                 elif b_col == 0 or b_col == 2*r:
-                    val1 = get_max(matrix, b_row-1, b_col, typs, VAL) + 100
+                    val1 = get_max(matrix, b_row-1, b_col, typs, VAL) + INF
                     for typ in range(typs):
                         matrix[typ, b_row, b_col, VAL] = val1
                         matrix[typ, b_row, b_col, TYP] = MAT
                         matrix[typ, b_row, b_col, RUN] = 0
                     continue
 
+                # get n-polymer info
+                if a_col >= a_cols - 1:
+                    rpts = rpt = n = idx = 0
+                else:
+                    rpts = np_info[RPTS, ref_idx+1]
+                    rpt = np_info[RPT, ref_idx+1]
+                    n = np_info[N, ref_idx+1]
+                    idx = np_info[IDX, ref_idx+1]
+
 
                 # UPDATE INS MATRIX
-                val1 = matrix[MAT, b_top_row, b_top_col, VAL] + indel_start
-                val2 = matrix[INS, b_top_row, b_top_col, VAL] + indel_extend
-                if val1 < val2: # start insertion
-                    matrix[INS, b_row, b_col, VAL] = val1
-                    matrix[INS, b_row, b_col, TYP] = INS
-                    matrix[INS, b_row, b_col, RUN] = 1
-                else: # continue insertion
-                    if a_row == inss[brk] + 1:
-                        run = 1
-                    else:
-                        run = <int>(matrix[INS, b_top_row, b_top_col, RUN]) + 1
-                    matrix[INS, b_row, b_col, VAL] = val2
-                    matrix[INS, b_row, b_col, TYP] = INS
-                    matrix[INS, b_row, b_col, RUN] = run
+                if a_row == inss[brk]: # first row
+                    matrix[INS, b_row, b_col, VAL] = INF * (a_col-dels[brk]+1)
+                    matrix[INS, b_row, b_col, TYP] = DEL
+                    matrix[INS, b_row, b_col, RUN] = a_col - dels[brk]
+                else:
+                    val1 = matrix[MAT, b_top_row, b_top_col, VAL] + indel_start
+                    val2 = matrix[INS, b_top_row, b_top_col, VAL] + indel_extend
+                    if val1 < val2: # start insertion
+                        matrix[INS, b_row, b_col, VAL] = val1
+                        matrix[INS, b_row, b_col, TYP] = INS
+                        matrix[INS, b_row, b_col, RUN] = 1
+                    else: # continue insertion
+                        if a_row == inss[brk] + 1:
+                            run = 1
+                        else:
+                            run = <int>(matrix[INS, b_top_row, b_top_col, RUN]) + 1
+                        matrix[INS, b_row, b_col, VAL] = val2
+                        matrix[INS, b_row, b_col, TYP] = INS
+                        matrix[INS, b_row, b_col, RUN] = run
 
 
                 # UPDATE DEL MATRIX
-                val1 = matrix[MAT, b_left_row, b_left_col, VAL] + indel_start
-                val2 = matrix[DEL, b_left_row, b_left_col, VAL] + indel_extend
-                if val1 < val2: # start deletion
-                    matrix[DEL, b_row, b_col, VAL] = val1
-                    matrix[DEL, b_row, b_col, TYP] = DEL
-                    matrix[DEL, b_row, b_col, RUN] = 1
-                else: # continue deletion
-                    if a_col == dels[brk] + 1:
-                        run = 1
-                    else:
-                        run = <int>(matrix[DEL, b_left_row, b_left_col, RUN]) + 1
-                    matrix[DEL, b_row, b_col, VAL] = val2
-                    matrix[DEL, b_row, b_col, TYP] = DEL
-                    matrix[DEL, b_row, b_col, RUN] = run
-
-
-                # UPDATE NPI MATRIX
-                np_start = ref_idx == 0 and ref_nps[0] != 0 or \
-                        ref_nps[ref_idx] != ref_nps[ref_idx-1] or \
-                        ref_np_lens[ref_idx] > ref_np_lens[ref_idx-1]
-
-                # # UPDATE NPI MATRIX
-                # if seq_idx+2 < a_rows-1 and ref_idx+1 < a_cols-1 and \
-                #         seq[seq_idx+1] == seq[seq_idx+2]: # only insert same base
-
-                #     val1 = matrix[MAT, b_top_row, b_top_col, VAL] + \
-                #             np_score(ref_np_lens[ref_idx+1], 1, np_scores)
-                #     if a_row == inss[brk] + 1:
-                #         run = 1
-                #     else:
-                #         run = <int>(matrix[NPI, b_top_row, b_top_col, RUN]) + 1
-                #     val2 = matrix[NPI, 
-                #             a_to_b_row(a_row-run, a_col, inss, dels, r) - brk, 
-                #             a_to_b_col(a_row-run, a_col, inss, dels, r), VAL] + \
-                #             np_score(ref_np_lens[ref_idx+1], run, np_scores)
-                #     if val1 < val2: # start lengthen
-                #         matrix[NPI, b_row, b_col, VAL] = val1
-                #         matrix[NPI, b_row, b_col, TYP] = NPI
-                #         matrix[NPI, b_row, b_col, RUN] = 1
-                #     else: # continue lengthen
-                #         matrix[NPI, b_row, b_col, VAL] = val2
-                #         matrix[NPI, b_row, b_col, TYP] = NPI
-                #         matrix[NPI, b_row, b_col, RUN] = run
-
-                # else: # don't allow insertion of different base
-                #     val2 = matrix[MAT, b_diag_row, b_diag_col, VAL] + 100
-                #     matrix[NPI, b_row, b_col, VAL] = val2
-                #     matrix[NPI, b_row, b_col, TYP] = NPI
-                #     matrix[NPI, b_row, b_col, RUN] = 0
-
-
-                # UPDATE NPD MATRIX
-                if ref_idx+1 < a_cols-1 and \
-                        ref[ref_idx+1] == ref[ref_idx]: # only delete same base
-
-                    val1 = matrix[MAT, b_left_row, b_left_col, VAL] + \
-                        np_score(ref_np_lens[ref_idx], -1, np_scores)
-                    if a_col == dels[brk] + 1:
-                        run = 1
-                    else:
-                        run = <int>(matrix[NPD, b_left_row, b_left_col, RUN] + 1)
-                    val2 = matrix[NPD, 
-                            a_to_b_row(a_row, a_col-run, inss, dels, r) - brk, 
-                            a_to_b_col(a_row, a_col-run, inss, dels, r), VAL] + \
-                            np_score(ref_np_lens[ref_idx], -run, np_scores)
-                    if val1 < val2: # start shorten
-                        matrix[NPD, b_row, b_col, VAL] = val1
-                        matrix[NPD, b_row, b_col, TYP] = NPD
-                        matrix[NPD, b_row, b_col, RUN] = 1
-                    else: # continue shorten
-                        matrix[NPD, b_row, b_col, VAL] = val2
-                        matrix[NPD, b_row, b_col, TYP] = NPD
-                        matrix[NPD, b_row, b_col, RUN] = run
-
-                else: # don't allow deleting different base
-                    val2 = matrix[MAT, b_diag_row, b_diag_col, VAL] + 100
-                    matrix[NPD, b_row, b_col, VAL] = val2
-                    matrix[NPD, b_row, b_col, TYP] = NPD
-                    matrix[NPD, b_row, b_col, RUN] = 0
+                if a_col == dels[brk]: # first col
+                    matrix[DEL, b_row, b_col, VAL] = INF * (a_row-inss[brk]+1)
+                    matrix[DEL, b_row, b_col, TYP] = INS
+                    matrix[DEL, b_row, b_col, RUN] = a_row - inss[brk]
+                else:
+                    val1 = matrix[MAT, b_left_row, b_left_col, VAL] + indel_start
+                    val2 = matrix[DEL, b_left_row, b_left_col, VAL] + indel_extend
+                    if val1 < val2: # start deletion
+                        matrix[DEL, b_row, b_col, VAL] = val1
+                        matrix[DEL, b_row, b_col, TYP] = DEL
+                        matrix[DEL, b_row, b_col, RUN] = 1
+                    else: # continue deletion
+                        if a_col == dels[brk] + 1:
+                            run = 1
+                        else:
+                            run = <int>(matrix[DEL, b_left_row, b_left_col, RUN]) + 1
+                        matrix[DEL, b_row, b_col, VAL] = val2
+                        matrix[DEL, b_row, b_col, TYP] = DEL
+                        matrix[DEL, b_row, b_col, RUN] = run
 
 
                 # UPDATE MAT MATRIX
-                if matrix[MAT, b_diag_row, b_diag_col, TYP] == MAT:
-                    run = <int>(matrix[MAT, b_diag_row, b_diag_col, RUN]) + 1
+                if a_row > inss[brk] and a_col > dels[brk]: # can move diag
+                    if matrix[MAT, b_diag_row, b_diag_col, TYP] == MAT:
+                        run = <int>(matrix[MAT, b_diag_row, b_diag_col, RUN]) + 1
+                    else:
+                        run = 1
+                    val1 = matrix[MAT, b_diag_row, b_diag_col, VAL] + \
+                            sub_scores[ seq[seq_idx], ref[ref_idx] ]
+                    matrix[MAT, b_row, b_col, VAL] = val1
+                    matrix[MAT, b_row, b_col, TYP] = MAT
+                    matrix[MAT, b_row, b_col, RUN] = run
+
                 else:
-                    run = 1
-                val1 = matrix[MAT, b_diag_row, b_diag_col, VAL] + \
-                        sub_scores[ seq[seq_idx], ref[ref_idx] ]
-                matrix[MAT, b_row, b_col, VAL] = val1
-                matrix[MAT, b_row, b_col, TYP] = MAT
-                matrix[MAT, b_row, b_col, RUN] = run
+                    # ensure val1 isn't chosen
+                    val1 = matrix[DEL, b_row, b_col, VAL] + INF
 
                 # end INDEL
-                for typ in [INS, NPI, DEL, NPD]:
+                for typ in range(1,typs): # [INS, NPI, DEL, NPD]
                     val2 = matrix[typ, b_row, b_col, VAL]
                     if val2 < val1:
                         val1 = val2
@@ -558,6 +556,66 @@ cpdef align(char[::1] ref, char[::1] seq, str cigar,
                         matrix[MAT, b_row, b_col, VAL] = val2
                         matrix[MAT, b_row, b_col, TYP] = typ
                         matrix[MAT, b_row, b_col, RUN] = run
+
+
+                # UPDATE NPI MATRIX
+                if a_row == inss[brk]: # first row
+                    matrix[NPI, b_row, b_col, VAL] = INF * (a_col-dels[brk])
+                    matrix[NPI, b_row, b_col, TYP] = DEL
+                    matrix[NPI, b_row, b_col, RUN] = a_col - dels[brk]
+
+                # start insertion
+                b_ndown_row = a_to_b_row(a_row+n, a_col, inss, dels, r) - brk
+                b_ndown_col = a_to_b_col(a_row+n, a_col, inss, dels, r)
+                if a_row+n <= inss[next_brk] and b_ndown_col > 0: # np spans breakpoint
+                    if n > 0 and idx == 0 and rpt == 0 and \
+                            match(ref[ref_idx+1:ref_idx+n+1], seq[seq_idx+1:seq_idx+1+n]):
+                        val1 = matrix[MAT, b_row, b_col, VAL] + \
+                                np_score(n, rpts, 1, np_scores, max_np_len)
+                        matrix[NPI, b_ndown_row, b_ndown_col, VAL] = val1
+                        matrix[NPI, b_ndown_row, b_ndown_col, TYP] = NPI
+                        matrix[NPI, b_ndown_row, b_ndown_col, RUN] = n
+
+                    # continue insertion
+                    if n > 0 and idx == 0 and \
+                            match(ref[ref_idx+1:ref_idx+n+1], seq[seq_idx:seq_idx+n]): 
+                        run = <int>(matrix[NPI, b_row, b_col, RUN]) + n
+                        b_runup_row = a_to_b_row(a_row+n-run, a_col, inss, dels, r) - brk
+                        b_runup_col = a_to_b_col(a_row+n-run, a_col, inss, dels, r)
+                        if run > n and a_row+n-run >= inss[brk] and b_runup_col < 2*r:
+                            val2 = matrix[NPI, b_runup_row, b_runup_col, VAL] + \
+                                np_score(n, rpts, <int>(run/n), np_scores, max_np_len)
+                            matrix[NPI, b_ndown_row, b_ndown_col, VAL] = val2
+                            matrix[NPI, b_ndown_row, b_ndown_col, TYP] = NPI
+                            matrix[NPI, b_ndown_row, b_ndown_col, RUN] = run
+
+
+                # UPDATE NPD MATRIX
+                if a_col == dels[brk]: # first col
+                    matrix[NPD, b_row, b_col, VAL] = INF * (a_row-inss[brk])
+                    matrix[NPD, b_row, b_col, TYP] = INS
+                    matrix[NPD, b_row, b_col, RUN] = a_row - inss[brk]
+
+                b_nright_row = a_to_b_row(a_row, a_col+n, inss, dels, r) - brk
+                b_nright_col = a_to_b_col(a_row, a_col+n, inss, dels, r)
+                if a_col+n <= dels[next_brk] and b_nright_col < 2*r: # np spans breakpoint
+                    if n > 0 and idx == 0 and rpt == 0: # start deletion
+                        val1 = matrix[MAT, b_row, b_col, VAL] + \
+                            np_score(n, rpts, -1, np_scores, max_np_len)
+                        matrix[NPD, b_nright_row, b_nright_col, VAL] = val1
+                        matrix[NPD, b_nright_row, b_nright_col, TYP] = NPD
+                        matrix[NPD, b_nright_row, b_nright_col, RUN] = n
+
+                    elif n > 0 and idx == 0: # continue deletion
+                        run = <int>(matrix[NPD, b_row, b_col, RUN]) + n
+                        b_runleft_row = a_to_b_row(a_row, a_col+n-run, inss, dels, r) - brk
+                        b_runleft_col = a_to_b_col(a_row, a_col+n-run, inss, dels, r)
+                        if run > n and a_col+n-run >= dels[brk] and b_runleft_col > 0:
+                            val2 = matrix[NPD, b_runleft_row, b_runleft_col, VAL] + \
+                                np_score(n, rpts, <int>(-run/n), np_scores, max_np_len)
+                            matrix[NPD, b_nright_row, b_nright_col, VAL] = val2
+                            matrix[NPD, b_nright_row, b_nright_col, TYP] = NPD
+                            matrix[NPD, b_nright_row, b_nright_col, RUN] = run
 
 
         # initialize backtracking from last cell
@@ -568,6 +626,7 @@ cpdef align(char[::1] ref, char[::1] seq, str cigar,
         b_col = a_to_b_col(a_row, a_col, inss, dels, r)
         typ = <int>(matrix[MAT, b_row, b_col, VAL])
         run = 0
+        path = []
 
         # backtrack
         while a_row > inss[brk] or a_col > dels[brk]:
@@ -577,6 +636,18 @@ cpdef align(char[::1] ref, char[::1] seq, str cigar,
             typ = <int>(matrix[MAT, b_row, b_col, TYP])
             run = <int>(matrix[MAT, b_row, b_col, RUN])
 
+            # if verbose: # do some error-checking
+            path.append((MAT, a_row, a_col))
+            if a_row < 0:
+                print(f"ERROR: row < 0 @ A:({a_row},{a_col}), B:({b_row},{b_col})")
+                break
+            if a_col < 0:
+                print(f"ERROR: col < 0 @ A:({a_row},{a_col}), B:({b_row},{b_col})")
+                break
+            if run < 1:
+                print("ERROR: run is zero.")
+                break
+
             # Invalid NPDs and NPIs are run 0. They should never be reached during 
             # backtracking (due to high penalties), but leaving this here just-in-case
             if run < 1: run = 1
@@ -584,11 +655,11 @@ cpdef align(char[::1] ref, char[::1] seq, str cigar,
             op = ''
             if typ == NPI or typ == INS:   # each move is an insertion
                 for i in range(run):
-                    op += 'I'
+                    op += 'I' #if typ == INS else 'L'
                 a_row -= run
             elif typ == NPD or typ == DEL: # each move is a deletion
                 for i in range(run):
-                    op += 'D'
+                    op += 'D' #if typ == DEL else 'S'
                 a_col -= run
             elif typ == MAT: # only sub if stay in same matrix
                 i = 0
@@ -606,6 +677,48 @@ cpdef align(char[::1] ref, char[::1] seq, str cigar,
             aln += op
 
         full_aln += aln[::-1]
+
+
+        if verbose:
+            # debug print matrices
+            types = ['MAT', 'INS', 'NPI', 'DEL', 'NPD']
+            ops = 'MILDS'
+            bases = 'NACGT'
+
+            # PRINT A
+            for typ, name in enumerate(types):
+                print('\nA:', name)
+                s = '    -'
+                for base in ref:
+                    s += '        ' + bases[base]
+                print(s)
+
+                for row in range(a_rows):
+
+                    if row == 0:
+                        s = '-'
+                    else:
+                        s = bases[seq[row-1]]
+
+                    for col in range(a_cols):
+                        b_row = a_to_b_row(row, col, inss, dels, r)
+                        b_col = a_to_b_col(row, col, inss, dels, r)
+                        op = ops[<int>(matrix[typ, b_row, b_col, TYP])]
+                        val = f"{<int>(matrix[typ, b_row, b_col, VAL]):04}"
+                        if (typ, row, col) in path:
+                            mark = '$'
+                        elif col == 0 or row == 0:
+                            mark = '*'
+                        elif b_row == 0 or b_col == 2*r:
+                            mark = '.'
+                        else:
+                            mark = ' '
+                        run = <int>(matrix[typ, b_row, b_col, RUN])
+                        if run < 10:
+                            s += "  " + str(run) + op + mark + val
+                        else:
+                            s += " " + str(run) + op + mark + val
+                    print(s)
 
     return full_aln
 
@@ -636,13 +749,13 @@ def dump(ref, seq, cigar):
             seq_idx += 1
             cig_str += 'X'
 
-        elif op == 'D':
+        elif op == 'D' or op == 'S':
             ref_str += ref[ref_idx]
             ref_idx += 1
             seq_str += '-'
             cig_str += ' '
 
-        elif op == 'I':
+        elif op == 'I' or op == 'L':
             ref_str += '-'
             seq_str += seq[seq_idx]
             seq_idx += 1

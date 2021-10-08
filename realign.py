@@ -106,18 +106,19 @@ def main():
                 get_refseq_positions(cfg.args.hap2_cig)
     else: print(' ')
 
-    cigar1_data = ("1", "chr19", 0, 0, cfg.args.hap1_cig, \
-            "="*len(cfg.args.reference), cfg.args.reference, \
-            cfg.args.reference, cfg.args.hap1, 1)
-    cigar2_data = ("2", "chr19", 0, 0, cfg.args.hap2_cig, \
-            "="*len(cfg.args.reference), cfg.args.reference, \
-            cfg.args.reference, cfg.args.hap2, 2)
+    if cfg.args.apply_vcf:
+        cigar1_data = ("1", "chr19", 0, 0, cfg.args.hap1_cig, \
+                "="*len(cfg.args.reference), cfg.args.reference, \
+                cfg.args.reference, cfg.args.hap1, 1)
+        cigar2_data = ("2", "chr19", 0, 0, cfg.args.hap2_cig, \
+                "="*len(cfg.args.reference), cfg.args.reference, \
+                cfg.args.reference, cfg.args.hap2, 2)
 
-    print(f"\n> saving debug output to bam")
-    hap_to_bam(cigar1_data, cfg.args.out[:-9]+"hap")
-    hap_to_bam(cigar2_data, cfg.args.out[:-9]+"hap")
-    subprocess.run(['samtools', 'index', f'{cfg.args.out[:-9]}hap1.bam'])
-    subprocess.run(['samtools', 'index', f'{cfg.args.out[:-9]}hap2.bam'])
+        print(f"\n> saving debug output to bam")
+        hap_to_bam(cigar1_data, cfg.args.out[:-9]+"hap")
+        hap_to_bam(cigar2_data, cfg.args.out[:-9]+"hap")
+        subprocess.run(['samtools', 'index', f'{cfg.args.out[:-9]}hap1.bam'])
+        subprocess.run(['samtools', 'index', f'{cfg.args.out[:-9]}hap2.bam'])
 
     print('> adding haplotype data to reads')
     with cfg.read_count.get_lock(): cfg.read_count.value = 0
