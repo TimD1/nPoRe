@@ -164,7 +164,7 @@ def plot_np_score_matrices(nps, max_np_len = 20):
 @cython.boundscheck(False)
 @cython.wraparound(False)
 @cython.cdivision(True)
-cpdef int[:,:] get_np_info(char[:] seq):
+cpdef int[:,::1] get_np_info(char[::1] seq):
     ''' Calculate N-polymer information. 
 
          seq:     A T A T A T T T T T T T A A A G C
@@ -251,7 +251,7 @@ cdef float np_score(int n, int ref_np_len, int indel_len, float[:,:,::1] np_scor
 
 @cython.boundscheck(False)
 @cython.wraparound(False)
-cdef int[:] get_inss(str cigar):
+cdef int[::1] get_inss(str cigar):
     ''' CIGAR must contain only "I" and "D". '''
 
     cdef int cig_len = len(cigar)
@@ -270,7 +270,7 @@ cdef int[:] get_inss(str cigar):
 
 @cython.boundscheck(False)
 @cython.wraparound(False)
-cdef int[:] get_dels(str cigar):
+cdef int[::1] get_dels(str cigar):
     ''' CIGAR must contain only "I" and "D". '''
 
     cdef int cig_len = len(cigar)
@@ -289,12 +289,12 @@ cdef int[:] get_dels(str cigar):
 
 @cython.boundscheck(False)
 @cython.wraparound(False)
-cdef int a_to_b_row(int a_row, int a_col, int[:] inss, int[:] dels, int r):
+cdef int a_to_b_row(int a_row, int a_col, int[::1] inss, int[::1] dels, int r):
     return a_row + a_col
 
 @cython.boundscheck(False)
 @cython.wraparound(False)
-cdef int a_to_b_col(int a_row, int a_col, int[:] inss, int[:] dels, int r):
+cdef int a_to_b_col(int a_row, int a_col, int[::1] inss, int[::1] dels, int r):
     cdef int b_row, b_col
     b_row = a_row + a_col
     b_col = inss[b_row] - a_row + r
@@ -304,34 +304,22 @@ cdef int a_to_b_col(int a_row, int a_col, int[:] inss, int[:] dels, int r):
 
 @cython.boundscheck(False)
 @cython.wraparound(False)
-cdef int b_to_a_row(int b_row, int b_col, int[:] inss, int[:] dels, int r):
+cdef int b_to_a_row(int b_row, int b_col, int[::1] inss, int[::1] dels, int r):
     return inss[b_row] + r - b_col
 
 @cython.boundscheck(False)
 @cython.wraparound(False)
-cdef int b_to_a_col(int b_row, int b_col, int[:] inss, int[:] dels, int r):
+cdef int b_to_a_col(int b_row, int b_col, int[::1] inss, int[::1] dels, int r):
     return dels[b_row] - r + b_col
 
 
 
 @cython.boundscheck(False)
 @cython.wraparound(False)
-cdef float get_max(float[:,:,:,:] matrix, int row, int col, int typs, int VAL):
-    cdef int typ
-    cdef float max_val = matrix[0, row, col, VAL]
-    for typ in range(1, typs):
-        if matrix[typ, row, col, VAL] > max_val:
-            max_val = matrix[typ, row, col, VAL]
-    return max_val
-
-
-
-@cython.boundscheck(False)
-@cython.wraparound(False)
-cdef int[:] get_breaks(int chunk_size, int array_size, int[:] inss, int[:] dels):
+cdef int[::1] get_breaks(int chunk_size, int array_size, int[::1] inss, int[::1] dels):
     cdef int buf_len = 1 + math.ceil( (array_size-1) / (chunk_size-1) )
     breaks_buf = np.zeros(buf_len, dtype=np.intc)
-    cdef int[:] breaks = breaks_buf
+    cdef int[::1] breaks = breaks_buf
     cdef int i
     for i in range(buf_len-1):
         breaks[i] = i * (chunk_size-1)
@@ -363,7 +351,7 @@ cdef int match(char[::1] A, char[::1] B):
 # @cython.boundscheck(False)
 # @cython.wraparound(False)
 # @cython.cdivision(True)
-cpdef align(char[::1] ref, char[::1] seq, str cigar, 
+cpdef align(char[::1] full_ref, char[::1] seq, str cigar, 
         float[:,::1] sub_scores, float[:,:,::1] np_scores, 
         float indel_start=5, float indel_extend=1, int max_b_rows = 20000,
         int r = 30, int verbose=0):
@@ -374,14 +362,15 @@ cpdef align(char[::1] ref, char[::1] seq, str cigar,
             .replace('M','DI').replace('S','').replace('H','')
 
     # precompute offsets, breakpoints, and homopolymers
-    cdef int[:] inss = get_inss(cigar)
-    cdef int[:] dels = get_dels(cigar)
-    cdef int[:] breaks = get_breaks(max_b_rows, len(seq) + len(ref) + 1, inss, dels)
-    cdef int[:,:] np_info = get_np_info(ref)
+    cdef int[::1] inss = get_inss(cigar)
+    cdef int[::1] dels = get_dels(cigar)
+    cdef int[::1] breaks = get_breaks(max_b_rows, len(seq) + len(full_ref) + 1, inss, dels)
+    cdef int[:,::1] np_info
+    cdef char[::1] ref
 
     # define useful constants
     cdef int a_rows = len(seq) + 1
-    cdef int a_cols = len(ref) + 1
+    cdef int a_cols = len(full_ref) + 1
     cdef int b_cols = 2*r + 1
     cdef int b_rows = -1
 
@@ -426,10 +415,13 @@ cpdef align(char[::1] ref, char[::1] seq, str cigar,
 
     # iterate over b matrix in chunks set by breakpoints
     for brk_idx in range(len(breaks)-1):
+
         brk = breaks[brk_idx]
         next_brk = breaks[brk_idx+1]
         b_rows = next_brk - brk + 1
         matrix_buf.fill(0)
+        ref = full_ref[ dels[brk] : dels[next_brk]+1 ]
+        np_info = get_np_info(ref)
 
         # initialize N-polymer matrices with invalid states
         for b_row in range(b_rows):
@@ -460,7 +452,7 @@ cpdef align(char[::1] ref, char[::1] seq, str cigar,
                 b_left_col = a_to_b_col(a_row, a_col-1, inss, dels, r)
                 b_diag_row = a_to_b_row(a_row-1, a_col-1, inss, dels, r) - brk
                 b_diag_col = a_to_b_col(a_row-1, a_col-1, inss, dels, r)
-                ref_idx = a_col - 1
+                ref_idx = a_col - dels[brk] - 1
                 seq_idx = a_row - 1
 
                 # skip cells out of range of this chunk of original "A" matrix
@@ -470,9 +462,8 @@ cpdef align(char[::1] ref, char[::1] seq, str cigar,
 
                 # enforce new path remains within r cells of original path
                 elif b_col == 0 or b_col == 2*r:
-                    val1 = get_max(matrix, b_row-1, b_col, typs, VAL) + INF
                     for typ in range(typs):
-                        matrix[typ, b_row, b_col, VAL] = val1
+                        matrix[typ, b_row, b_col, VAL] = INF * (b_row+1)
                         matrix[typ, b_row, b_col, TYP] = MAT
                         matrix[typ, b_row, b_col, RUN] = 0
                     continue
@@ -645,7 +636,7 @@ cpdef align(char[::1] ref, char[::1] seq, str cigar,
                 print(f"ERROR: col < 0 @ A:({a_row},{a_col}), B:({b_row},{b_col})")
                 break
             if run < 1:
-                print("ERROR: run is zero.")
+                print(f"\nERROR: run 0 @ A:({a_row},{a_col}), B:({b_row},{b_col}),  type {typ}, val {val}")
                 break
 
             # Invalid NPDs and NPIs are run 0. They should never be reached during 
@@ -666,7 +657,7 @@ cpdef align(char[::1] ref, char[::1] seq, str cigar,
                 while i < run:
                     a_row -= 1
                     a_col -= 1
-                    if ref[a_col] == seq[a_row]:
+                    if ref[a_col-dels[brk]] == seq[a_row]:
                         op += '='
                     else:
                         op += 'X'
