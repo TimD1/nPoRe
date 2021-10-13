@@ -155,15 +155,8 @@ def realign_read(read_data):
     for i in range(len(seq)): 
         int_seq[i] = cfg.base_dict[seq[i]]
 
-    # print(  f'aln read:{read_id:8s}'
-    #         f'\tseq:{len(seq)} {seq_len(cigar)}'
-    #         f'\tref:{len(hap_ref)} {ref_len(cigar)}')
-
     # align
     new_cigar = align(int_ref, int_seq, cigar, cfg.args.sub_scores, cfg.args.np_scores)
-    # print(  f'aln read:{read_id:8s}'
-    #         f'\tseq:{len(seq)} {seq_len(cigar)}->{seq_len(new_cigar)}'
-    #         f'\tref:{len(hap_ref)} {ref_len(cigar)}->{ref_len(new_cigar)}')
 
     with cfg.read_count.get_lock():
         cfg.read_count.value += 1
@@ -299,8 +292,8 @@ def get_confusion_matrices():
 
     else:
         print("> calculating confusion matrices")
-        print(f"0 of {(cfg.args.contig_end-cfg.args.contig_beg)//cfg.args.chunk_width} chunks processed"
-            f" ({cfg.args.contig}:{cfg.args.contig_beg}:{cfg.args.contig_end}).", end='', flush=True)
+        print(f"0 of {(cfg.args.contig_end-cfg.args.contig_beg+cfg.args.chunk_width-1)//cfg.args.chunk_width} chunks processed"
+            f" ({cfg.args.contig}:{cfg.args.contig_beg}-{cfg.args.contig_end}).", end='', flush=True)
         ranges = get_ranges(cfg.args.contig_beg, cfg.args.contig_end)
         with mp.Pool() as pool: # multi-threaded
             results = list(pool.map(calc_confusion_matrices, ranges))

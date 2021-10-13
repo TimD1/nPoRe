@@ -214,7 +214,8 @@ cpdef int[:,::1] get_np_info(char[::1] seq):
             if np_repeat_len: np_repeat_len += 1 # count first
 
             # save n-polymer info
-            if n * np_repeat_len > np_info[N, seq_idx] * np_info[RPTS, seq_idx]:
+            if np_repeat_len > 2 and \
+                    n * np_repeat_len > np_info[N, seq_idx] * np_info[RPTS, seq_idx]:
                 for rpt in range(np_repeat_len):
                     for idx in range(n):
                         pos = seq_idx + rpt*n + idx

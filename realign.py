@@ -41,8 +41,7 @@ def argparser():
 
     parser.add_argument("--apply_vcf")
     parser.add_argument("--min_qual", type=int, default=0)
-    parser.add_argument("--std_cigar", action="store_true")
-    parser.add_argument("--indels_only", action="store_true")
+    parser.add_argument("--indel_cigar", action="store_true")
 
     return parser
 
@@ -86,18 +85,14 @@ def main():
         print(f"> applying '{vcf2}' to reference")
         cfg.args.hap2, cfg.args.hap2_cig = apply_vcf(vcf2, cfg.args.reference)
 
-        if cfg.args.std_cigar:
-            print(f"> standardizing haplotype cigars")
-            _, _, _, _, _, cfg.args.hap1_cig, _, _, _, _ = \
-                    standardize_cigar(("1", "chr19", 0, 0, "", cfg.args.hap1_cig, 
-                        cfg.args.reference, "", cfg.args.hap1, 2))
-            _, _, _, _, _, cfg.args.hap2_cig, _, _, _, _ = \
-                    standardize_cigar(("2", "chr19", 0, 0, "", cfg.args.hap2_cig, 
-                        cfg.args.reference, "", cfg.args.hap2, 2))
-            print('')
-        else:
-            cfg.args.hap1_cig = cfg.args.hap1_cig.replace('X','M').replace('=','M')
-            cfg.args.hap2_cig = cfg.args.hap2_cig.replace('X','M').replace('=','M')
+        print(f"> standardizing haplotype cigars")
+        _, _, _, _, _, cfg.args.hap1_cig, _, _, _, _ = \
+                standardize_cigar(("1", "chr19", 0, 0, "", cfg.args.hap1_cig, 
+                    cfg.args.reference, "", cfg.args.hap1, 2))
+        _, _, _, _, _, cfg.args.hap2_cig, _, _, _, _ = \
+                standardize_cigar(("2", "chr19", 0, 0, "", cfg.args.hap2_cig, 
+                    cfg.args.reference, "", cfg.args.hap2, 2))
+        print('')
 
         print(f"> precomputing haplotype positions")
         cfg.args.ref_poss_hap1, cfg.args.hap1_poss = \
@@ -114,7 +109,7 @@ def main():
                 "="*len(cfg.args.reference), cfg.args.reference, \
                 cfg.args.reference, cfg.args.hap2, 2)
 
-        print(f"\n> saving debug output to bam")
+        print(f"> saving debug output to bam")
         hap_to_bam(cigar1_data, cfg.args.out[:-9]+"hap")
         hap_to_bam(cigar2_data, cfg.args.out[:-9]+"hap")
         subprocess.run(['samtools', 'index', f'{cfg.args.out[:-9]}hap1.bam'])
@@ -141,9 +136,8 @@ def main():
             read_data = pool.map(from_haplotype_ref, read_data)
 
         with cfg.read_count.get_lock(): cfg.read_count.value = 0
-        if cfg.args.std_cigar:
-            print('\n> converting to standard INDEL format')
-            read_data = pool.map(standardize_cigar, read_data)
+        print('\n> converting to standard CIGAR format')
+        read_data = pool.map(standardize_cigar, read_data)
 
     print(f"\n> saving results to '{cfg.args.out}'")
     write_results(read_data, cfg.args.out)
@@ -154,9 +148,4 @@ def main():
 if __name__ == "__main__":
     parser = argparser()
     cfg.args = parser.parse_args()
-
-    if cfg.args.indels_only and not cfg.args.std_cigar:
-        print("ERROR: cannot set 'indels_only' without 'std_cigar'.")
-        exit(1)
-
     main()

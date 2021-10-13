@@ -86,10 +86,9 @@ def main():
     # subprocess.run(['samtools', 'index', f'{cfg.args.out}pre1.bam'])
     # subprocess.run(['samtools', 'index', f'{cfg.args.out}pre2.bam'])
 
-    if cfg.args.std_cigar:
-        print(f"\n> standardizing hap cigars")
-        with mp.Pool() as pool:
-            data = pool.map(standardize_cigar, data)
+    print(f"\n> standardizing hap cigars")
+    with mp.Pool() as pool:
+        data = pool.map(standardize_cigar, data)
     cigar1_data = data[0]
     cigar2_data = data[1]
 
@@ -143,8 +142,7 @@ def argparser():
     parser.add_argument("--max_np_len", type=int, default=100)
     parser.add_argument("--chunk_width", type=int, default=10000)
 
-    parser.add_argument("--std_cigar", action="store_true")
-    parser.add_argument("--indels_only", action="store_true")
+    parser.add_argument("--indel_cigar", action="store_true")
     parser.add_argument("--min_qual", type=int, default=0)
     return parser
 
