@@ -2,7 +2,8 @@
 
 DIR="/x/gm24385/chr19"
 BC="guppy_4_0_11"
-BAM="$DIR/$BC/margin/output.haplotagged.bam"
+OUT="ra_hap"
+BAM="$DIR/$BC/$OUT/1_phased.bam"
 REF="$DIR/ref/GCA_000001405.15_GRCh38_no_alt_analysis_set.fasta"
 VCF="$DIR/$BC/margin_hp/output.phased.vcf.gz"
 
@@ -10,14 +11,10 @@ VCF="$DIR/$BC/margin_hp/output.phased.vcf.gz"
 time python3 ../realign.py \
     $BAM \
     $REF \
-    --vcf $VCF \
-    --stats_dir ../stats \
+    ./realigned.bam \
     --contig chr19 \
-    --contig_beg 1 \
-    --contig_end 100000 \
-    --splice_subs \
-    --indels_only \
-    realigned.bam
+    --max_reads 3 \
+    --stats_dir ../stats
 
 # update MD tags
-~/NanoporeScripts/align ./realigned.bam $REF
+# ~/NanoporeScripts/align ./realigned.bam $REF

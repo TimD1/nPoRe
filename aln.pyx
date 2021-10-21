@@ -349,9 +349,9 @@ cdef int match(char[::1] A, char[::1] B):
 
 
 
-# @cython.boundscheck(False)
-# @cython.wraparound(False)
-# @cython.cdivision(True)
+@cython.boundscheck(False)
+@cython.wraparound(False)
+@cython.cdivision(True)
 cpdef align(char[::1] full_ref, char[::1] seq, str cigar, 
         float[:,::1] sub_scores, float[:,:,::1] np_scores, 
         float indel_start=5, float indel_extend=1, int max_b_rows = 20000,
@@ -755,7 +755,6 @@ def dump(ref, seq, cigar):
 
         else:
             print(f"ERROR: unrecognized CIGAR operation '{op}' at cigar index {len(cig_str)}.")
-            exit(1)
 
     print(f"REF: len: {len(ref)} ciglen: {sum([op in 'XD=M' for op in cigar])}\n"
           f"SEQ: len: {len(seq)} ciglen: {sum([op in 'SXI=M' for op in cigar])}\n"
