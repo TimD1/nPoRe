@@ -165,6 +165,30 @@ def realign_read(read_data):
     return (read_id, ref_name, start, stop, new_cigar, hap_cigar, ref, hap_ref, seq, hap)
 
 
+
+def realign_read2(read_data):
+    # unpack
+    read_id, ref_name, start, stop, cigar, hap_cigar, ref, hap_ref, seq, hap = read_data
+
+    # convert strings to np character arrays for efficiency
+    # padded_ref = 
+    int_ref = np.zeros(len(hap_ref), dtype=np.uint8)
+    for i in range(len(hap_ref)): 
+        int_ref[i] = cfg.base_dict[hap_ref[i]]
+    int_seq = np.zeros(len(seq), dtype=np.uint8)
+    for i in range(len(seq)): 
+        int_seq[i] = cfg.base_dict[seq[i]]
+
+    # align
+    new_cigar = align(int_ref, int_seq, cigar, cfg.args.sub_scores, cfg.args.np_scores)
+
+    with cfg.read_count.get_lock():
+        cfg.read_count.value += 1
+        print(f"\r    {cfg.read_count.value} reads realigned.", end='', flush=True)
+
+    return (read_id, ref_name, start, stop, new_cigar, hap_cigar, ref, hap_ref, seq, hap)
+
+
     
 def write_results(read_data, outfile):
     '''
@@ -278,7 +302,7 @@ def get_confusion_matrices():
     ''' Load cached SUB/INDEL confusion matrices if they exist. 
         Otherwise, calculate them from the provided BAM.
     '''
-    if not cfg.args.recalc_cms and \
+    if not cfg.args.recalc and \
             os.path.isfile(f'{cfg.args.stats_dir}/subs_cm.npy') and \
             os.path.isfile(f'{cfg.args.stats_dir}/nps_cm.npy') and \
             os.path.isfile(f'{cfg.args.stats_dir}/inss_cm.npy') and \
@@ -312,6 +336,190 @@ def get_confusion_matrices():
         np.save(f'{cfg.args.stats_dir}/dels_cm', dels)
 
         return subs, nps, inss, dels
+
+
+
+def get_pileup_info():
+
+    max_inss = get_max_inss()
+    cfg.args.pileup_positions = calc_positions(max_inss)
+    cfg.args.pileup_scores = get_pileup_scores()
+
+    # # print debug pileup counts
+    # print("\n\t\t\tN\tA\tC\tG\tT\t-")
+    # ct = cfg.args.contig_beg
+    # for x in range(cfg.args.pileup_positions[0], cfg.args.pileup_positions[-1]):
+    #     if x in cfg.args.pileup_positions:
+    #         print(f"{ct}\t{cfg.args.reference[ct]}", end="")
+    #         ct += 1
+    #     else:
+    #         print("\t\t-", end="")
+    #     for i in range(6):
+    #         print(f"\t{cfg.args.pileup_scores[i,x-cfg.args.contig_beg]:03f}", end="")
+    #     print(" ")
+
+
+
+def get_pileup_scores():
+    ''' Load cached pileup info, or calculate from BAM. 
+    '''
+
+    if not cfg.args.recalc and  os.path.isfile(f'{cfg.args.stats_dir}/pileup_scores.npy'):
+        print("> loading pileup scores")
+        return np.load(f'{cfg.args.stats_dir}/pileup_scores.npy')
+
+    else:
+        print("> calculating pileup scores")
+        with cfg.pos_count.get_lock():
+            cfg.pos_count.value = 0
+        print(f"0 of {(cfg.args.contig_end-cfg.args.contig_beg+cfg.args.chunk_width-1)//cfg.args.chunk_width} chunks processed"
+            f" ({cfg.args.contig}:{cfg.args.contig_beg}-{cfg.args.contig_end}).", end='', flush=True)
+
+        ranges = get_ranges(cfg.args.contig_beg, cfg.args.contig_end)
+        with mp.Pool() as pool: # multi-threaded
+            results = list(pool.map(calc_pileup_scores, ranges))
+        pileup_scores = np.concatenate(results, axis=1)
+        print(" ")
+        np.save(f'{cfg.args.stats_dir}/pileup_scores', pileup_scores)
+
+    return pileup_scores
+
+
+
+def calc_pileup_scores(range_tuple):
+    '''
+    Calculate negative log-likelihood of N/A/C/G/T/- per pileup column.
+    '''
+    BIAS = 0.25
+    window_start, window_end = range_tuple
+    pileup_start_idx = cfg.args.pileup_positions[window_start-cfg.args.contig_beg]
+    pileup_end_idx = cfg.args.pileup_positions[window_end-cfg.args.contig_beg]
+    pileups = np.zeros((6, pileup_end_idx-pileup_start_idx)) + BIAS
+
+    # check that BAM exists, initialize
+    try:
+        bam = pysam.AlignmentFile(cfg.args.bam, 'rb')
+    except FileNotFoundError:
+        print(f"ERROR: BAM file '{cfg.args.bam}' not found.")
+        exit(1)
+
+    # iterate over all reference positions
+    for read in bam.fetch(cfg.args.contig, window_start, window_end):
+
+        try:
+            s = read.query_sequence[0]
+        except TypeError: 
+            # throwing error due to NoneType, checking for None fails...
+            continue
+
+        # find read substring overlapping region
+        cigar_types = [ c[0] for c in read.cigartuples ]
+        cigar_counts = [ c[1] for c in read.cigartuples ]
+        read_idx, ref_idx = 0, read.reference_start
+        read_start = max(read.reference_start, window_start)
+        prev_cigar = None
+        prev_count = 0
+        pileup_idx = 0
+
+        # walk along reference, keeping stats
+        while ref_idx < window_end and ref_idx < read.reference_end:
+
+            read_move, ref_move = None, None
+            cigar = cigar_types[0]
+            count = cigar_counts[0]
+
+            # determine whether to move on read/ref
+            if cigar == Cigar.S:    # soft-clipped
+                read_move = True
+                ref_move = False
+            elif cigar == Cigar.H:    # hard-clipped
+                read_move = False
+                ref_move = False
+            elif cigar == Cigar.X:    # substitution
+                read_move = True
+                ref_move = True
+            elif cigar == Cigar.I:    # insertion
+                read_move = True
+                ref_move = False
+            elif cigar == Cigar.D:    # deletion
+                read_move = False
+                ref_move = True
+            elif cigar == Cigar.E:    # match
+                read_move = True
+                ref_move = True
+            elif cigar == Cigar.M:    # match/sub
+                read_move = True
+                ref_move = True
+            else:
+                print(f"ERROR: unexpected CIGAR type for {read.query_name}")
+                exit(1)
+
+            if ref_idx >= read_start:
+                if cigar == Cigar.M or cigar == Cigar.X or cigar == Cigar.E:
+                    while pileup_idx + pileup_start_idx < cfg.args.pileup_positions[ref_idx-cfg.args.contig_beg]:
+                        pileups[cfg.base_dict['-'], pileup_idx] += 1
+                        pileup_idx += 1
+                    pileups[cfg.base_dict[read.query_sequence[read_idx]], pileup_idx] += 1
+                    pileup_idx += 1
+                elif cigar == Cigar.I:
+                    pileups[cfg.base_dict[read.query_sequence[read_idx]], pileup_idx] += 1
+                    pileup_idx += 1
+                elif cigar == Cigar.D:
+                    while pileup_idx + pileup_start_idx < cfg.args.pileup_positions[ref_idx-cfg.args.contig_beg]:
+                        pileups[cfg.base_dict['-'], pileup_idx] += 1
+                        pileup_idx += 1
+                    pileups[cfg.base_dict['-'], pileup_idx] += 1
+                    pileup_idx += 1
+
+            # store previous action (to detect indels directly prior to HP)
+            if cigar != prev_cigar:
+                prev_cigar = cigar
+                prev_count = count
+
+            # shift
+            if ref_move: ref_idx += 1
+            if read_move: read_idx += 1
+            cigar_counts[0] -= 1
+
+            # move to next CIGAR section of interest
+            if cigar_counts[0] == 0:
+                del cigar_counts[0]
+                del cigar_types[0]
+
+    with cfg.pos_count.get_lock():
+        cfg.pos_count.value += 1
+        print(f"\r{cfg.pos_count.value} of "
+            f"{(cfg.args.contig_end-cfg.args.contig_beg+cfg.args.chunk_width-1)//cfg.args.chunk_width} chunks processed"
+            f" ({cfg.args.contig}:{cfg.args.contig_beg}-{cfg.args.contig_end}).", end='', flush=True)
+
+    pileup_sum = np.sum(pileups, axis=0) + BIAS*6
+    return -np.log(np.divide(pileups, pileup_sum))
+
+
+
+def get_max_inss():
+    ''' Load cached INSs info, or calculate from BAM. 
+    '''
+
+    if os.path.isfile(f'{cfg.args.stats_dir}/max_inss.npy'):
+        print("> loading max insertions")
+        return np.load(f'{cfg.args.stats_dir}/max_inss.npy')
+
+    else:
+        print("> calculating max insertions")
+        with cfg.pos_count.get_lock():
+            cfg.pos_count.value = 0
+        print(f"0 of {(cfg.args.contig_end-cfg.args.contig_beg+cfg.args.chunk_width-1)//cfg.args.chunk_width} chunks processed"
+            f" ({cfg.args.contig}:{cfg.args.contig_beg}-{cfg.args.contig_end}).", end='', flush=True)
+
+        ranges = get_ranges(cfg.args.contig_beg, cfg.args.contig_end)
+        with mp.Pool() as pool: # multi-threaded
+            results = list(pool.map(calc_max_inss, ranges))
+        max_inss = np.concatenate(results, axis=None)
+        print(" ")
+        np.save(f'{cfg.args.stats_dir}/max_inss', max_inss)
+
+    return max_inss
 
 
 
@@ -430,6 +638,7 @@ def calc_confusion_matrices(range_tuple):
 
         # get reference, precalculate n-polymer stats
         try:
+            # ref = reference[read_start:window_end]
             ref = read.get_reference_sequence().upper() \
                     [max(0, window_start-read.reference_start) : window_end-read.reference_start]
         except TypeError: 
@@ -555,7 +764,91 @@ def calc_confusion_matrices(range_tuple):
     with cfg.pos_count.get_lock():
         cfg.pos_count.value += 1
         print(f"\r{cfg.pos_count.value} of "
-            f"{(cfg.args.contig_end-cfg.args.contig_beg)//cfg.args.chunk_width} chunks processed"
-            f" ({cfg.args.contig}:{cfg.args.contig_beg}:{cfg.args.contig_end}).", end='', flush=True)
+            f"{(cfg.args.contig_end-cfg.args.contig_beg+cfg.args.chunk_width-1)//cfg.args.chunk_width} chunks processed"
+            f" ({cfg.args.contig}:{cfg.args.contig_beg}-{cfg.args.contig_end}).", end='', flush=True)
 
     return subs, nps, inss, dels
+
+
+
+def calc_max_inss(range_tuple):
+    ''' Measure basecaller SUB/INDEL error profile. '''
+
+    # check that BAM exists, initialize
+    try:
+        bam = pysam.AlignmentFile(cfg.args.bam, 'rb')
+    except FileNotFoundError:
+        print(f"ERROR: BAM file '{cfg.args.bam}' not found.")
+        exit(1)
+
+    # iterate over all reference positions
+    window_start, window_end = range_tuple
+    max_inss = np.zeros(window_end-window_start, dtype=int)
+    for read in bam.fetch(cfg.args.contig, window_start, window_end):
+
+        # find read substring overlapping region
+        cigar_types = [ c[0] for c in read.cigartuples ]
+        cigar_counts = [ c[1] for c in read.cigartuples ]
+        read_idx, ref_idx = 0, read.reference_start
+        read_start = max(read.reference_start, window_start)
+        prev_count = 0
+
+        # walk along reference, keeping stats
+        while ref_idx < window_end and ref_idx < read.reference_end:
+
+            read_move, ref_move = None, None
+            cigar = cigar_types[0]
+            count = cigar_counts[0]
+
+            # determine whether to move on read/ref
+            if cigar == Cigar.S:    # soft-clipped
+                read_move = True
+                ref_move = False
+            elif cigar == Cigar.H:    # hard-clipped
+                read_move = False
+                ref_move = False
+            elif cigar == Cigar.X:    # substitution
+                read_move = True
+                ref_move = True
+            elif cigar == Cigar.I:    # insertion
+                read_move = True
+                ref_move = False
+            elif cigar == Cigar.D:    # deletion
+                read_move = False
+                ref_move = True
+            elif cigar == Cigar.E:    # match
+                read_move = True
+                ref_move = True
+            elif cigar == Cigar.M:    # match/sub
+                read_move = True
+                ref_move = True
+            else:
+                print(f"ERROR: unexpected CIGAR type for {read.query_name}")
+                exit(1)
+
+            if ref_idx > read_start and cigar == Cigar.I:
+                max_inss[ref_idx-window_start] = \
+                        max(max_inss[ref_idx-window_start], count)
+
+            # move on to next section
+            if ref_move: ref_idx += count
+            if read_move: read_idx += count
+            del cigar_counts[0]
+            del cigar_types[0]
+
+    with cfg.pos_count.get_lock():
+        cfg.pos_count.value += 1
+        print(f"\r{cfg.pos_count.value} of "
+            f"{(cfg.args.contig_end-cfg.args.contig_beg+cfg.args.chunk_width-1)//cfg.args.chunk_width} chunks processed"
+            f" ({cfg.args.contig}:{cfg.args.contig_beg}-{cfg.args.contig_end}).", end='', flush=True)
+
+    return max_inss
+
+
+
+def calc_positions(inss):
+    """
+    Calculate the position of a reference base in the new padded reference matrix.
+    """
+    poss = cfg.args.contig_beg + np.cumsum(inss+1)-1
+    return np.concatenate((poss, poss[-1]+1), axis=None)

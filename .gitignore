@@ -11,3 +11,4 @@ venv*
 test/out*
 *.vcf*
 *.nfs*
+*.ipynb*

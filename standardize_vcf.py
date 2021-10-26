@@ -137,7 +137,7 @@ def argparser():
     parser.add_argument("--contig_end", type=int)
 
     parser.add_argument("--stats_dir", default="./stats")
-    parser.add_argument("--recalc_cms", action="store_true")
+    parser.add_argument("--recalc", action="store_true")
 
     parser.add_argument("--max_np", type=int, default=10)
     parser.add_argument("--max_np_len", type=int, default=100)

@@ -23,6 +23,7 @@ base_dict['a'] = 1
 base_dict['c'] = 2
 base_dict['g'] = 3
 base_dict['t'] = 4
+base_dict['-'] = 5
 
 # convert Cigar to string
 cigars = 'MIDNSHP=XB'
