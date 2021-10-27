@@ -12,7 +12,7 @@ time python3 ../realign.py \
     $BAM \
     $REF \
     ./realigned.bam \
-    --recalc \
+    --recalc_pileups \
     --contig chr19 \
     --contig_beg 45593495 \
     --contig_end 45593600 \

@@ -143,6 +143,10 @@ def get_read_data(bam_fn):
 
 
 def realign_read(read_data):
+    '''
+    Re-align reads using better estimates of SNP frequencies in new alignment
+    algorithm, taking n-polymer indels into account.
+    '''
 
     # unpack
     read_id, ref_name, start, stop, cigar, hap_cigar, ref, hap_ref, seq, hap = read_data
@@ -167,11 +171,35 @@ def realign_read(read_data):
 
 
 def realign_read2(read_data):
+    '''
+    Re-align reads using SNP frequency information from other read alignments.
+    '''
+
     # unpack
     read_id, ref_name, start, stop, cigar, hap_cigar, ref, hap_ref, seq, hap = read_data
+    padded_cigar = get_padded_cigar(cigar, start, stop)
+    if start == cfg.args.contig_beg:
+        padded_ref = cfg.args.padded_ref[cfg.args.contig_beg : 
+            cfg.args.pileup_positions[stop-cfg.args.contig_beg]
+        ]
+    else:
+        padded_ref = cfg.args.padded_ref[
+                cfg.args.pileup_positions[start-cfg.args.contig_beg-1]+1 : 
+                cfg.args.pileup_positions[stop-cfg.args.contig_beg]
+        ]
+
+    with cfg.read_count.get_lock():
+        print(" ")
+        print("start:")
+        print(padded_cigar[:40])
+        print(padded_ref[:40])
+        print("end:")
+        print(padded_cigar[-40:])
+        print(padded_ref[-40:])
+        print(" ")
+        exit(0)
 
     # convert strings to np character arrays for efficiency
-    # padded_ref = 
     int_ref = np.zeros(len(hap_ref), dtype=np.uint8)
     for i in range(len(hap_ref)): 
         int_ref[i] = cfg.base_dict[hap_ref[i]]
@@ -187,6 +215,34 @@ def realign_read2(read_data):
         print(f"\r    {cfg.read_count.value} reads realigned.", end='', flush=True)
 
     return (read_id, ref_name, start, stop, new_cigar, hap_cigar, ref, hap_ref, seq, hap)
+
+
+
+def get_padded_cigar(cigar, ref_start, ref_stop):
+    '''
+    After padding reference with '-' bases, we need to insert the appropriate
+    deletions 'D' into each read's CIGAR string.
+    '''
+
+    padded_cigar = ""
+    ref_idx = ref_start - cfg.args.contig_beg
+    for cig in cigar:
+        if cig == 'I':
+            padded_cigar += cig
+        elif cig in 'M=XD':
+            if ref_idx == 0:
+                padded_cigar += 'D' * cfg.args.pileup_positions[ref_idx] - \
+                        cfg.args.contig_beg
+            else:
+                padded_cigar += 'D' * (cfg.args.pileup_positions[ref_idx] - \
+                        cfg.args.pileup_positions[ref_idx-1] - 1)
+            padded_cigar += cig
+            ref_idx += 1
+        else:
+            print("ERROR: unexpected CIGAR in 'get_padded_cigar()'")
+
+    assert(ref_idx == ref_stop)
+    return padded_cigar
 
 
     
@@ -302,7 +358,8 @@ def get_confusion_matrices():
     ''' Load cached SUB/INDEL confusion matrices if they exist. 
         Otherwise, calculate them from the provided BAM.
     '''
-    if not cfg.args.recalc and \
+
+    if not cfg.args.recalc_cms and \
             os.path.isfile(f'{cfg.args.stats_dir}/subs_cm.npy') and \
             os.path.isfile(f'{cfg.args.stats_dir}/nps_cm.npy') and \
             os.path.isfile(f'{cfg.args.stats_dir}/inss_cm.npy') and \
@@ -377,7 +434,7 @@ def get_pileup_scores():
     ''' Load cached pileup info, or calculate from BAM. 
     '''
 
-    if not cfg.args.recalc and os.path.isfile(f'{cfg.args.stats_dir}/pileup_scores.npy'):
+    if not cfg.args.recalc_pileups and os.path.isfile(f'{cfg.args.stats_dir}/pileup_scores.npy'):
         print("> loading pileup scores")
         return np.load(f'{cfg.args.stats_dir}/pileup_scores.npy')
 
@@ -517,7 +574,7 @@ def get_max_inss():
     ''' Load cached INSs info, or calculate from BAM. 
     '''
 
-    if not cfg.args.recalc and os.path.isfile(f'{cfg.args.stats_dir}/max_inss.npy'):
+    if not cfg.args.recalc_pileups and os.path.isfile(f'{cfg.args.stats_dir}/max_inss.npy'):
         print("> loading max insertions")
         return np.load(f'{cfg.args.stats_dir}/max_inss.npy')
 

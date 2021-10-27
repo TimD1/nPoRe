@@ -12,3 +12,6 @@ test/out*
 *.vcf*
 *.nfs*
 *.ipynb*
+*.fasta
+*.fai
+*.fastq

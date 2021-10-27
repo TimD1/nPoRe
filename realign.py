@@ -37,7 +37,8 @@ def argparser():
 
     # boolean options
     parser.add_argument("--plot", action="store_true")
-    parser.add_argument("--recalc", action="store_true")
+    parser.add_argument("--recalc_cms", action="store_true")
+    parser.add_argument("--recalc_pileups", action="store_true")
 
     parser.add_argument("--apply_vcf")
     parser.add_argument("--min_qual", type=int, default=0)
@@ -51,7 +52,6 @@ def main():
 
     os.makedirs(cfg.args.stats_dir, exist_ok=True)
     get_pileup_info()
-    exit(0)
     subs, nps, inss, dels = get_confusion_matrices()
 
     if cfg.args.plot:
@@ -129,7 +129,7 @@ def main():
         print('\n> computing read realignments')
         with cfg.read_count.get_lock(): cfg.read_count.value = 0
         print(f"\r    0 reads realigned.", end='', flush=True)
-        read_data = pool.map(realign_read, read_data)
+        read_data = pool.map(realign_read2, read_data)
 
         if cfg.args.apply_vcf:
             print('\n> changing read basis hap->ref')
