@@ -3,9 +3,10 @@
 DIR="/x/gm24385/chr19"
 BC="guppy_4_0_11"
 OUT="ra_hap"
-BAM="$DIR/$BC/$OUT/1_phased.bam"
-REF="$DIR/ref/GCA_000001405.15_GRCh38_no_alt_analysis_set.fasta"
-VCF="$DIR/$BC/margin_hp/output.phased.vcf.gz"
+# BAM="$DIR/$BC/$OUT/1_phased.bam"
+# REF="$DIR/ref/GCA_000001405.15_GRCh38_no_alt_analysis_set.fasta"
+BAM="reads.bam"
+REF="ref.fasta"
 
 # run ReAligner
 time python3 ../realign.py \
@@ -13,9 +14,9 @@ time python3 ../realign.py \
     $REF \
     ./realigned.bam \
     --recalc_pileups \
-    --contig chr19 \
-    --contig_beg 45593495 \
-    --contig_end 45593600 \
+    --contig ref \
+    --contig_beg 200 \
+    --contig_end 700 \
     --chunk_width 10 \
     --stats_dir ../stats
 

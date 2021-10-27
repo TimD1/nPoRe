@@ -52,6 +52,7 @@ def main():
 
     os.makedirs(cfg.args.stats_dir, exist_ok=True)
     get_pileup_info()
+    exit(0)
     subs, nps, inss, dels = get_confusion_matrices()
 
     if cfg.args.plot:

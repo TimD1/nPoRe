@@ -398,34 +398,32 @@ def get_confusion_matrices():
 
 def get_pileup_info():
 
+    cfg.args.reference = get_fasta(cfg.args.ref, cfg.args.contig)
     max_inss = get_max_inss()
     cfg.args.pileup_positions = calc_positions(max_inss)
-    cfg.args.pileup_scores = get_pileup_scores()
     cfg.args.padded_ref = get_padded_reference()
+    cfg.args.pileup_scores = get_pileup_scores()
 
-    # # print debug pileup counts
-    # print("\n\t\t\tN\tA\tC\tG\tT\t-")
-    # ct = cfg.args.contig_beg
-    # for idx, ref_base in enumerate(cfg.args.padded_ref):
-    #     if ref_base in cfg.bases:
-    #         print(f"{ct}\t{ref_base}", end="")
-    #         ct += 1
-    #     else: # -
-    #         print(f"\t\t{ref_base}", end="")
-    #     for i in range(6):
-    #         print(f"\t{cfg.args.pileup_scores[i,idx]:.2f}", end="")
-    #     print(" ")
+    # print debug pileup counts
+    print("\n\t\tN\tA\tC\tG\tT\t-")
+    ct = 0
+    for idx, ref_base in enumerate(cfg.args.padded_ref):
+        if ref_base in cfg.bases:
+            print(f"{ct}\t{ref_base}", end="")
+            ct += 1
+        else: # padding '-'
+            print(f"\t{ref_base}", end="")
+        for i in range(6):
+            print(f"\t{cfg.args.pileup_scores[i,idx]:.2f}", end="")
+        print(" ")
 
 
 
 def get_padded_reference():
-    ref = get_fasta(cfg.args.ref, cfg.args.contig)\
-                [cfg.args.contig_beg:cfg.args.contig_end]
-    padded_len = cfg.args.pileup_positions[-1] - cfg.args.contig_beg + 1
+    padded_len = cfg.args.pileup_positions[-1] + 1
     padded_ref = ["-"] * padded_len
-    for idx, global_pos in enumerate(cfg.args.pileup_positions):
-        rel_pos = global_pos - cfg.args.contig_beg
-        padded_ref[rel_pos] = ref[idx]
+    for idx, pos in enumerate(cfg.args.pileup_positions):
+        padded_ref[pos] = cfg.args.reference[idx]
     return ''.join(padded_ref)
     
 
@@ -440,12 +438,13 @@ def get_pileup_scores():
 
     else:
         print("> calculating pileup scores")
+        reflen = len(cfg.args.reference)
         with cfg.pos_count.get_lock():
             cfg.pos_count.value = 0
-        print(f"0 of {(cfg.args.contig_end-cfg.args.contig_beg+cfg.args.chunk_width-1)//cfg.args.chunk_width} chunks processed"
-            f" ({cfg.args.contig}:{cfg.args.contig_beg}-{cfg.args.contig_end}).", end='', flush=True)
+        print(f"0 of {(reflen+cfg.args.chunk_width-1)//cfg.args.chunk_width}"
+                f" chunks processed.", end='', flush=True)
 
-        ranges = get_ranges(cfg.args.contig_beg, cfg.args.contig_end)
+        ranges = get_ranges(0, reflen)
         with mp.Pool() as pool: # multi-threaded
             results = list(pool.map(calc_pileup_scores, ranges))
         pileup_scores = np.concatenate(results, axis=1)
@@ -462,11 +461,12 @@ def calc_pileup_scores(range_tuple):
     '''
     BIAS = 0.25
     window_start, window_end = range_tuple
-    if window_start - cfg.args.contig_beg == 0:
-        pileup_start_idx = cfg.args.contig_beg
+    # include preceding insertions, handling edge case at start
+    if window_start == 0:
+        pileup_start_idx = 0
     else:
-        pileup_start_idx = cfg.args.pileup_positions[window_start-1-cfg.args.contig_beg]+1
-    pileup_end_idx = cfg.args.pileup_positions[window_end-1-cfg.args.contig_beg]
+        pileup_start_idx = cfg.args.pileup_positions[window_start-1]+1
+    pileup_end_idx = cfg.args.pileup_positions[window_end-1] # non-inclusive
     pileups = np.zeros((6, pileup_end_idx-pileup_start_idx+1)) + BIAS
 
     # check that BAM exists, initialize
@@ -529,7 +529,8 @@ def calc_pileup_scores(range_tuple):
 
             if ref_idx >= read_start:
                 if cigar == Cigar.M or cigar == Cigar.X or cigar == Cigar.E:
-                    while pileup_idx + pileup_start_idx < cfg.args.pileup_positions[ref_idx-cfg.args.contig_beg]:
+                    while pileup_idx + pileup_start_idx < \
+                            cfg.args.pileup_positions[ref_idx]:
                         pileups[cfg.base_dict['-'], pileup_idx] += 1
                         pileup_idx += 1
                     pileups[cfg.base_dict[read.query_sequence[read_idx]], pileup_idx] += 1
@@ -538,7 +539,8 @@ def calc_pileup_scores(range_tuple):
                     pileups[cfg.base_dict[read.query_sequence[read_idx]], pileup_idx] += 1
                     pileup_idx += 1
                 elif cigar == Cigar.D:
-                    while pileup_idx + pileup_start_idx < cfg.args.pileup_positions[ref_idx-cfg.args.contig_beg]:
+                    while pileup_idx + pileup_start_idx < \
+                            cfg.args.pileup_positions[ref_idx]:
                         pileups[cfg.base_dict['-'], pileup_idx] += 1
                         pileup_idx += 1
                     pileups[cfg.base_dict['-'], pileup_idx] += 1
@@ -562,8 +564,8 @@ def calc_pileup_scores(range_tuple):
     with cfg.pos_count.get_lock():
         cfg.pos_count.value += 1
         print(f"\r{cfg.pos_count.value} of "
-            f"{(cfg.args.contig_end-cfg.args.contig_beg+cfg.args.chunk_width-1)//cfg.args.chunk_width} chunks processed"
-            f" ({cfg.args.contig}:{cfg.args.contig_beg}-{cfg.args.contig_end}).", end='', flush=True)
+            f"{(len(cfg.args.reference)+cfg.args.chunk_width-1)//cfg.args.chunk_width}"
+            f" chunks processed.", end='', flush=True)
 
     pileup_sum = np.sum(pileups, axis=0) + BIAS*6
     return -np.log(np.divide(pileups, pileup_sum))
@@ -580,12 +582,13 @@ def get_max_inss():
 
     else:
         print("> calculating max insertions")
+        reflen = len(cfg.args.reference)
         with cfg.pos_count.get_lock():
             cfg.pos_count.value = 0
-        print(f"0 of {(cfg.args.contig_end-cfg.args.contig_beg+cfg.args.chunk_width-1)//cfg.args.chunk_width} chunks processed"
-            f" ({cfg.args.contig}:{cfg.args.contig_beg}-{cfg.args.contig_end}).", end='', flush=True)
+        print(f"0 of {(reflen+cfg.args.chunk_width-1)//cfg.args.chunk_width}"
+                f" chunks processed.", end='', flush=True)
 
-        ranges = get_ranges(cfg.args.contig_beg, cfg.args.contig_end)
+        ranges = get_ranges(0, reflen)
         with mp.Pool() as pool: # multi-threaded
             results = list(pool.map(calc_max_inss, ranges))
         max_inss = np.concatenate(results, axis=None)
@@ -845,7 +848,7 @@ def calc_confusion_matrices(range_tuple):
 
 
 def calc_max_inss(range_tuple):
-    ''' Measure basecaller SUB/INDEL error profile. '''
+    ''' Measure read 'error' profile, per pileup position. '''
 
     # check that BAM exists, initialize
     try:
@@ -899,7 +902,7 @@ def calc_max_inss(range_tuple):
                 print(f"ERROR: unexpected CIGAR type for {read.query_name}")
                 exit(1)
 
-            if ref_idx > read_start and cigar == Cigar.I:
+            if ref_idx >= read_start and cigar == Cigar.I:
                 max_inss[ref_idx-window_start] = \
                         max(max_inss[ref_idx-window_start], count)
 
@@ -912,8 +915,8 @@ def calc_max_inss(range_tuple):
     with cfg.pos_count.get_lock():
         cfg.pos_count.value += 1
         print(f"\r{cfg.pos_count.value} of "
-            f"{(cfg.args.contig_end-cfg.args.contig_beg+cfg.args.chunk_width-1)//cfg.args.chunk_width} chunks processed"
-            f" ({cfg.args.contig}:{cfg.args.contig_beg}-{cfg.args.contig_end}).", end='', flush=True)
+            f"{(len(cfg.args.reference)+cfg.args.chunk_width-1)//cfg.args.chunk_width}"
+            f" chunks processed.", end='', flush=True)
 
     return max_inss
 
@@ -923,4 +926,4 @@ def calc_positions(inss):
     """
     Calculate the position of a reference base in the new padded reference matrix.
     """
-    return cfg.args.contig_beg + np.cumsum(inss+1)-1
+    return np.cumsum(inss+1)-1

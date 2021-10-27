@@ -31,10 +31,10 @@ def collapse_cigar(extended_cigar, return_groups=False):
 
 
 
-reflen = 80
-nreads = 10
-readlen_min = 30
-readlen_max = 70
+reflen = 1000
+nreads = 1000
+readlen_min = 300
+readlen_max = 700
 
 # generate reference fasta
 ref_fn = "ref.fasta"
@@ -97,7 +97,7 @@ for idx in range(nreads):
             new_qscores += q
             cigar += '='
 
-    print(f'read{idx}\t0\tref\t{readstart+1}\t60\t{collapse_cigar(cigar)}\t*\t0\t{readlen}\t{new_read}\t{new_qscores}\txx:i:0', file=reads_sam)
+    print(f'read{idx}\t0\tref\t{readstart+1}\t60\t{collapse_cigar(cigar)}\t*\t0\t{readlen}\t{new_read}\t{new_qscores}', file=reads_sam)
 reads_fastq.close()
 reads_sam.close()
 
@@ -105,11 +105,4 @@ reads_sam.close()
 path = os.getcwd()
 subprocess.call([
     "/home/timdunn/NanoporeScripts/align", f"{path}/reads.sam", f"{path}/ref.fasta"
-])
-
-subprocess.call([
-    "samtools", "view",
-    "-b", "-F", "2304",
-    "-o", "reads.bam",
-    "reads.sam"
 ])
