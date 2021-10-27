@@ -344,27 +344,40 @@ def get_pileup_info():
     max_inss = get_max_inss()
     cfg.args.pileup_positions = calc_positions(max_inss)
     cfg.args.pileup_scores = get_pileup_scores()
+    cfg.args.padded_ref = get_padded_reference()
 
     # # print debug pileup counts
     # print("\n\t\t\tN\tA\tC\tG\tT\t-")
     # ct = cfg.args.contig_beg
-    # for x in range(cfg.args.pileup_positions[0], cfg.args.pileup_positions[-1]):
-    #     if x in cfg.args.pileup_positions:
-    #         print(f"{ct}\t{cfg.args.reference[ct]}", end="")
+    # for idx, ref_base in enumerate(cfg.args.padded_ref):
+    #     if ref_base in cfg.bases:
+    #         print(f"{ct}\t{ref_base}", end="")
     #         ct += 1
-    #     else:
-    #         print("\t\t-", end="")
+    #     else: # -
+    #         print(f"\t\t{ref_base}", end="")
     #     for i in range(6):
-    #         print(f"\t{cfg.args.pileup_scores[i,x-cfg.args.contig_beg]:03f}", end="")
+    #         print(f"\t{cfg.args.pileup_scores[i,idx]:.2f}", end="")
     #     print(" ")
 
+
+
+def get_padded_reference():
+    ref = get_fasta(cfg.args.ref, cfg.args.contig)\
+                [cfg.args.contig_beg:cfg.args.contig_end]
+    padded_len = cfg.args.pileup_positions[-1] - cfg.args.contig_beg + 1
+    padded_ref = ["-"] * padded_len
+    for idx, global_pos in enumerate(cfg.args.pileup_positions):
+        rel_pos = global_pos - cfg.args.contig_beg
+        padded_ref[rel_pos] = ref[idx]
+    return ''.join(padded_ref)
+    
 
 
 def get_pileup_scores():
     ''' Load cached pileup info, or calculate from BAM. 
     '''
 
-    if not cfg.args.recalc and  os.path.isfile(f'{cfg.args.stats_dir}/pileup_scores.npy'):
+    if not cfg.args.recalc and os.path.isfile(f'{cfg.args.stats_dir}/pileup_scores.npy'):
         print("> loading pileup scores")
         return np.load(f'{cfg.args.stats_dir}/pileup_scores.npy')
 
@@ -392,9 +405,12 @@ def calc_pileup_scores(range_tuple):
     '''
     BIAS = 0.25
     window_start, window_end = range_tuple
-    pileup_start_idx = cfg.args.pileup_positions[window_start-cfg.args.contig_beg]
-    pileup_end_idx = cfg.args.pileup_positions[window_end-cfg.args.contig_beg]
-    pileups = np.zeros((6, pileup_end_idx-pileup_start_idx)) + BIAS
+    if window_start - cfg.args.contig_beg == 0:
+        pileup_start_idx = cfg.args.contig_beg
+    else:
+        pileup_start_idx = cfg.args.pileup_positions[window_start-1-cfg.args.contig_beg]+1
+    pileup_end_idx = cfg.args.pileup_positions[window_end-1-cfg.args.contig_beg]
+    pileups = np.zeros((6, pileup_end_idx-pileup_start_idx+1)) + BIAS
 
     # check that BAM exists, initialize
     try:
@@ -501,7 +517,7 @@ def get_max_inss():
     ''' Load cached INSs info, or calculate from BAM. 
     '''
 
-    if os.path.isfile(f'{cfg.args.stats_dir}/max_inss.npy'):
+    if not cfg.args.recalc and os.path.isfile(f'{cfg.args.stats_dir}/max_inss.npy'):
         print("> loading max insertions")
         return np.load(f'{cfg.args.stats_dir}/max_inss.npy')
 
@@ -850,5 +866,4 @@ def calc_positions(inss):
     """
     Calculate the position of a reference base in the new padded reference matrix.
     """
-    poss = cfg.args.contig_beg + np.cumsum(inss+1)-1
-    return np.concatenate((poss, poss[-1]+1), axis=None)
+    return cfg.args.contig_beg + np.cumsum(inss+1)-1

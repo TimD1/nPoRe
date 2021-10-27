@@ -10,7 +10,8 @@ read_count = mp.Value('i', 0)
 results_count = mp.Value('i', 0)
 
 # global enum for bases ACGT
-bases = ['N', 'A', 'C', 'G', 'T']
+bases = 'NACGT'
+symbols = 'NACGT-'
 nbases = len(bases)
 base_dict = defaultdict(int)
 base_dict['N'] = 0
