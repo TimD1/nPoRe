@@ -96,8 +96,9 @@ for idx in range(nreads):
             new_read += base
             new_qscores += q
             cigar += '='
+    hap = np.random.randint(2) + 1
 
-    print(f'read{idx}\t0\tref\t{readstart+1}\t60\t{collapse_cigar(cigar)}\t*\t0\t{readlen}\t{new_read}\t{new_qscores}', file=reads_sam)
+    print(f'read{idx}\t0\tref\t{readstart+1}\t60\t{collapse_cigar(cigar)}\t*\t0\t{readlen}\t{new_read}\t{new_qscores}\tHP:i:{hap}', file=reads_sam)
 reads_fastq.close()
 reads_sam.close()
 

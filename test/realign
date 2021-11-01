@@ -15,10 +15,7 @@ time python3 ../realign.py \
     ./realigned.bam \
     --recalc_pileups \
     --contig ref \
-    --contig_beg 200 \
-    --contig_end 700 \
-    --chunk_width 10 \
     --stats_dir ../stats
 
 # update MD tags
-# ~/NanoporeScripts/align ./realigned.bam $REF
+~/NanoporeScripts/align ./realigned.bam $REF

@@ -52,14 +52,13 @@ def main():
 
     os.makedirs(cfg.args.stats_dir, exist_ok=True)
     get_pileup_info()
-    exit(0)
     subs, nps, inss, dels = get_confusion_matrices()
 
     if cfg.args.plot:
-        print("\n> plotting confusion matrices")
+        print("> plotting confusion matrices")
         plot_confusion_matrices(subs, nps, inss, dels)
 
-    print("\n> calculating score matrices")
+    print("> calculating score matrices")
     cfg.args.sub_scores, cfg.args.np_scores, cfg.args.ins_scores, cfg.args.del_scores = \
             calc_score_matrices(subs, nps, inss, dels)
 

@@ -95,7 +95,12 @@ def add_haplotype_data(read_data):
 def get_read_data(bam_fn):
 
     # count reads
-    bam = pysam.AlignmentFile(bam_fn, 'rb')
+    try:
+        bam = pysam.AlignmentFile(bam_fn, 'rb')
+    except FileNotFoundError:
+        print(f"ERROR: BAM file '{bam_fn}' not found.")
+        exit(1)
+
     reads = None
     if cfg.args.contig:
         reads = bam.fetch(
@@ -175,40 +180,26 @@ def realign_read2(read_data):
     Re-align reads using SNP frequency information from other read alignments.
     '''
 
-    # unpack
     read_id, ref_name, start, stop, cigar, hap_cigar, ref, hap_ref, seq, hap = read_data
+    # TODO: padded reference doesn't work with `apply_vcf`
     padded_cigar = get_padded_cigar(cigar, start, stop)
-    if start == cfg.args.contig_beg:
-        padded_ref = cfg.args.padded_ref[cfg.args.contig_beg : 
-            cfg.args.pileup_positions[stop-cfg.args.contig_beg]
-        ]
-    else:
-        padded_ref = cfg.args.padded_ref[
-                cfg.args.pileup_positions[start-cfg.args.contig_beg-1]+1 : 
-                cfg.args.pileup_positions[stop-cfg.args.contig_beg]
-        ]
-
-    with cfg.read_count.get_lock():
-        print(" ")
-        print("start:")
-        print(padded_cigar[:40])
-        print(padded_ref[:40])
-        print("end:")
-        print(padded_cigar[-40:])
-        print(padded_ref[-40:])
-        print(" ")
-        exit(0)
+    ref_start = 0 if start == 0 else cfg.args.pileup_positions[start-1]+1
+    pad_ref = cfg.args.padded_ref[
+            ref_start : 
+            cfg.args.pileup_positions[stop-1]+1
+    ]
 
     # convert strings to np character arrays for efficiency
-    int_ref = np.zeros(len(hap_ref), dtype=np.uint8)
-    for i in range(len(hap_ref)): 
-        int_ref[i] = cfg.base_dict[hap_ref[i]]
+    int_ref = np.zeros(len(pad_ref), dtype=np.uint8)
+    for i in range(len(pad_ref)): 
+        int_ref[i] = cfg.base_dict[pad_ref[i]]
     int_seq = np.zeros(len(seq), dtype=np.uint8)
     for i in range(len(seq)): 
         int_seq[i] = cfg.base_dict[seq[i]]
 
     # align
-    new_cigar = align(int_ref, int_seq, cigar, cfg.args.sub_scores, cfg.args.np_scores)
+    new_cigar = align2(int_ref, int_seq, ref_start, 
+            padded_cigar, hap-1, cfg.args.pileup_scores)
 
     with cfg.read_count.get_lock():
         cfg.read_count.value += 1
@@ -225,14 +216,13 @@ def get_padded_cigar(cigar, ref_start, ref_stop):
     '''
 
     padded_cigar = ""
-    ref_idx = ref_start - cfg.args.contig_beg
+    ref_idx = ref_start
     for cig in cigar:
         if cig == 'I':
             padded_cigar += cig
         elif cig in 'M=XD':
             if ref_idx == 0:
-                padded_cigar += 'D' * cfg.args.pileup_positions[ref_idx] - \
-                        cfg.args.contig_beg
+                padded_cigar += 'D' * cfg.args.pileup_positions[ref_idx]
             else:
                 padded_cigar += 'D' * (cfg.args.pileup_positions[ref_idx] - \
                         cfg.args.pileup_positions[ref_idx-1] - 1)
@@ -378,6 +368,7 @@ def get_confusion_matrices():
         ranges = get_ranges(cfg.args.contig_beg, cfg.args.contig_end)
         with mp.Pool() as pool: # multi-threaded
             results = list(pool.map(calc_confusion_matrices, ranges))
+        print(" ")
 
         # sum results
         sub_cms, np_cms, ins_cms, del_cms = list(map(np.array, zip(*results)))
@@ -396,7 +387,7 @@ def get_confusion_matrices():
 
 
 
-def get_pileup_info():
+def get_pileup_info(verbose=False):
 
     cfg.args.reference = get_fasta(cfg.args.ref, cfg.args.contig)
     max_inss = get_max_inss()
@@ -405,17 +396,20 @@ def get_pileup_info():
     cfg.args.pileup_scores = get_pileup_scores()
 
     # print debug pileup counts
-    print("\n\t\tN\tA\tC\tG\tT\t-")
-    ct = 0
-    for idx, ref_base in enumerate(cfg.args.padded_ref):
-        if ref_base in cfg.bases:
-            print(f"{ct}\t{ref_base}", end="")
-            ct += 1
-        else: # padding '-'
-            print(f"\t{ref_base}", end="")
-        for i in range(6):
-            print(f"\t{cfg.args.pileup_scores[i,idx]:.2f}", end="")
-        print(" ")
+    if verbose:
+        print("\n\nFULL PILEUP SCORE MATRIX")
+        for hap in range(2):
+            print("\n\t\tN\tA\tC\tG\tT\t-")
+            ct = 0
+            for idx, ref_base in enumerate(cfg.args.padded_ref):
+                if ref_base in cfg.bases:
+                    print(f"{ct}\t{ref_base}", end="")
+                    ct += 1
+                else: # padding '-'
+                    print(f"\t{ref_base}", end="")
+                for i in range(6):
+                    print(f"\t{cfg.args.pileup_scores[hap,i,idx]:.2f}", end="")
+                print(" ")
 
 
 
@@ -434,7 +428,7 @@ def get_pileup_scores():
 
     if not cfg.args.recalc_pileups and os.path.isfile(f'{cfg.args.stats_dir}/pileup_scores.npy'):
         print("> loading pileup scores")
-        return np.load(f'{cfg.args.stats_dir}/pileup_scores.npy')
+        return np.float32(np.load(f'{cfg.args.stats_dir}/pileup_scores.npy'))
 
     else:
         print("> calculating pileup scores")
@@ -447,7 +441,7 @@ def get_pileup_scores():
         ranges = get_ranges(0, reflen)
         with mp.Pool() as pool: # multi-threaded
             results = list(pool.map(calc_pileup_scores, ranges))
-        pileup_scores = np.concatenate(results, axis=1)
+        pileup_scores = np.concatenate(results, axis=2)
         print(" ")
         np.save(f'{cfg.args.stats_dir}/pileup_scores', pileup_scores)
 
@@ -466,8 +460,9 @@ def calc_pileup_scores(range_tuple):
         pileup_start_idx = 0
     else:
         pileup_start_idx = cfg.args.pileup_positions[window_start-1]+1
-    pileup_end_idx = cfg.args.pileup_positions[window_end-1] # non-inclusive
-    pileups = np.zeros((6, pileup_end_idx-pileup_start_idx+1)) + BIAS
+    pileup_end_idx = cfg.args.pileup_positions[window_end-1]+1
+    pileups = np.zeros((2, 6, pileup_end_idx-pileup_start_idx), 
+            dtype=np.float32) + BIAS
 
     # check that BAM exists, initialize
     try:
@@ -485,6 +480,12 @@ def calc_pileup_scores(range_tuple):
             # throwing error due to NoneType, checking for None fails...
             continue
 
+        hap = None
+        if read.has_tag('HP'):
+            hap = read.get_tag('HP')-1
+        else:
+            continue
+
         # find read substring overlapping region
         cigar_types = [ c[0] for c in read.cigartuples ]
         cigar_counts = [ c[1] for c in read.cigartuples ]
@@ -492,7 +493,7 @@ def calc_pileup_scores(range_tuple):
         read_start = max(read.reference_start, window_start)
         prev_cigar = None
         prev_count = 0
-        pileup_idx = 0
+        pileup_idx = read_start - window_start
 
         # walk along reference, keeping stats
         while ref_idx < window_end and ref_idx < read.reference_end:
@@ -531,19 +532,21 @@ def calc_pileup_scores(range_tuple):
                 if cigar == Cigar.M or cigar == Cigar.X or cigar == Cigar.E:
                     while pileup_idx + pileup_start_idx < \
                             cfg.args.pileup_positions[ref_idx]:
-                        pileups[cfg.base_dict['-'], pileup_idx] += 1
+                        pileups[hap, cfg.base_dict['-'], pileup_idx] += 1
                         pileup_idx += 1
-                    pileups[cfg.base_dict[read.query_sequence[read_idx]], pileup_idx] += 1
+                    pileups[hap, cfg.base_dict[read.query_sequence[read_idx]], 
+                            pileup_idx] += 1
                     pileup_idx += 1
                 elif cigar == Cigar.I:
-                    pileups[cfg.base_dict[read.query_sequence[read_idx]], pileup_idx] += 1
+                    pileups[hap, cfg.base_dict[read.query_sequence[read_idx]], 
+                            pileup_idx] += 1
                     pileup_idx += 1
                 elif cigar == Cigar.D:
                     while pileup_idx + pileup_start_idx < \
                             cfg.args.pileup_positions[ref_idx]:
-                        pileups[cfg.base_dict['-'], pileup_idx] += 1
+                        pileups[hap, cfg.base_dict['-'], pileup_idx] += 1
                         pileup_idx += 1
-                    pileups[cfg.base_dict['-'], pileup_idx] += 1
+                    pileups[hap, cfg.base_dict['-'], pileup_idx] += 1
                     pileup_idx += 1
 
             # store previous action (to detect indels directly prior to HP)
@@ -567,8 +570,12 @@ def calc_pileup_scores(range_tuple):
             f"{(len(cfg.args.reference)+cfg.args.chunk_width-1)//cfg.args.chunk_width}"
             f" chunks processed.", end='', flush=True)
 
-    pileup_sum = np.sum(pileups, axis=0) + BIAS*6
-    return -np.log(np.divide(pileups, pileup_sum))
+    pileup_sum = np.sum(pileups, axis=1) + BIAS*6
+    for h in range(pileups.shape[0]):
+        for b in range(pileups.shape[1]):
+            for i in range(pileups.shape[2]):
+                pileups[h,b,i] = -np.log(pileups[h,b,i] / pileup_sum[h,i])
+    return pileups
 
 
 
