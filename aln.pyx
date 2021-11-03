@@ -718,7 +718,7 @@ cpdef align(char[::1] full_ref, char[::1] seq, str cigar,
 @cython.wraparound(False)
 @cython.cdivision(True)
 cpdef align2(char[::1] full_ref, char[::1] seq, int ref_start, str cigar, int hap,
-        float[:,:,::1] pileup_scores, float ins_penalty=5.0, int max_b_rows = 20000,
+        float[:,:,::1] pileup_scores, float ins_penalty=7.0, int max_b_rows = 20000,
         int r = 30, int verbose=0):
     ''' Perform alignment.  '''
 
@@ -798,6 +798,10 @@ cpdef align2(char[::1] full_ref, char[::1] seq, int ref_start, str cigar, int ha
                         a_row > inss[next_brk] or a_col > dels[next_brk]:
                     continue
 
+                # force zero in first cell
+                elif a_row == inss[brk] and a_col == dels[brk]:
+                    continue
+
                 # enforce new path remains within r cells of original path
                 elif b_col == 0:
                     matrix[b_row, b_col, VAL] = INF * (b_row+r+1)
@@ -810,36 +814,27 @@ cpdef align2(char[::1] full_ref, char[::1] seq, int ref_start, str cigar, int ha
 
                 # initialize first row/col of A
                 elif a_row == inss[brk]:
-                    matrix[b_row, b_col, VAL] = (a_col-dels[brk]) * INF
+                    matrix[b_row, b_col, VAL] = \
+                            matrix[b_left_row, b_left_col, VAL] + \
+                            pileup_scores[hap, PAD, pileup_idx]
                     matrix[b_row, b_col, TYP] = DEL
                     continue
                 elif a_col == dels[brk]:
-                    matrix[b_row, b_col, VAL] = (a_row-inss[brk]) * INF
+                    matrix[b_row, b_col, VAL] = \
+                            matrix[b_top_row, b_top_col, VAL] + ins_penalty
                     matrix[b_row, b_col, TYP] = INS
                     continue
 
-                # UPDATE MATRIX
-
                 # SUB: diagonal movement, match N/A/C/G/T
-                if a_row > inss[brk] and a_col > dels[brk]: # can move diag
-                    val1 = matrix[b_diag_row, b_diag_col, VAL] + \
-                            pileup_scores[hap, seq[seq_idx], pileup_idx]
-                else: # illegal
-                    val1 = (b_row + b_col) * INF
+                val1 = matrix[b_diag_row, b_diag_col, VAL] + \
+                        pileup_scores[hap, seq[seq_idx], pileup_idx]
 
                 # INS: downwards movement, constant penalty
-                if a_row > inss[brk]:
-                    val2 = matrix[b_top_row, b_top_col, VAL] + ins_penalty
-                else: # illegal
-                    val2 = (b_row + b_col) * INF
+                val2 = matrix[b_top_row, b_top_col, VAL] + ins_penalty
                 
                 # DEL: rightwards movement, match -
-                if a_col > dels[brk]:
-                    val3 = matrix[b_left_row, b_left_col, VAL] + \
-                            pileup_scores[hap, PAD, pileup_idx]
-                else: # illegal
-                    val3 = (b_row + b_col) * INF
-
+                val3 = matrix[b_left_row, b_left_col, VAL] + \
+                        pileup_scores[hap, PAD, pileup_idx]
 
                 # choose best
                 if val1 < val2:
@@ -912,23 +907,25 @@ cpdef align2(char[::1] full_ref, char[::1] seq, int ref_start, str cigar, int ha
             ops = 'MID'
             bases = 'NACGT-'
 
+            # TODO: last base in last chunk not displayed (still aligned)
+
             # debug print pileup scores
             print(f"\n\n\nPILEUP SCORES, hap {hap}, chunk {brk_idx}")
             s = '   '
-            for ref_base in ref:
+            for ref_base in ref[:len(ref)-1]:
                 s += 6*' ' + bases[ref_base]
             print(s)
 
             for seq_base_idx in range(6):
                 print(f"  {bases[seq_base_idx]}:  ", end="")
-                for ref_idx in range(len(ref)):
+                for ref_idx in range(len(ref)-1):
                     print(f"   {pileup_scores[hap, seq_base_idx, ref_start+ref_idx+dels[brk]]:.2f}", end="")
                 print(" ")
 
             # debug print matrices
             print(f"\nMATRIX, chunk {brk_idx}")
             s = '  ~'
-            for base in ref:
+            for base in ref[:len(ref)-1]:
                 s += 6*' ' + bases[base]
             print(s)
 

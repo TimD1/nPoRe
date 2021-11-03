@@ -3,19 +3,28 @@
 DIR="/x/gm24385/chr19"
 BC="guppy_4_0_11"
 OUT="ra_hap"
+
 # BAM="$DIR/$BC/$OUT/1_phased.bam"
 # REF="$DIR/ref/GCA_000001405.15_GRCh38_no_alt_analysis_set.fasta"
-BAM="reads.bam"
-REF="ref.fasta"
+
+# BAM="reads.bam"
+# REF="ref.fasta"
+
+DIR="/home/timdunn/NanoporeScripts"
+BAM="$DIR/cropped.bam"
+REF="$DIR/cropped.fasta"
+OUT="$DIR/cropped_realigned.bam"
+
+~/NanoporeScripts/align $BAM $REF
 
 # run ReAligner
 time python3 ../realign.py \
     $BAM \
     $REF \
-    ./realigned.bam \
+    $OUT \
     --recalc_pileups \
-    --contig ref \
+    --contig chr19 \
     --stats_dir ../stats
 
 # update MD tags
-~/NanoporeScripts/align ./realigned.bam $REF
+~/NanoporeScripts/align $OUT $REF

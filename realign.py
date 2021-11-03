@@ -51,7 +51,6 @@ def argparser():
 def main():
 
     os.makedirs(cfg.args.stats_dir, exist_ok=True)
-    get_pileup_info()
     subs, nps, inss, dels = get_confusion_matrices()
 
     if cfg.args.plot:
@@ -126,10 +125,10 @@ def main():
             with cfg.read_count.get_lock(): cfg.read_count.value = 0
             read_data = pool.map(to_haplotype_ref, read_data)
 
-        print('\n> computing read realignments')
+        print('\n> computing individual read realignments')
         with cfg.read_count.get_lock(): cfg.read_count.value = 0
         print(f"\r    0 reads realigned.", end='', flush=True)
-        read_data = pool.map(realign_read2, read_data)
+        read_data = pool.map(realign_read, read_data)
 
         if cfg.args.apply_vcf:
             print('\n> changing read basis hap->ref')
@@ -140,6 +139,18 @@ def main():
         print('\n> converting to standard CIGAR format')
         read_data = pool.map(standardize_cigar, read_data)
 
+    print(f"\n> saving intermediary results to '{cfg.args.out[:-4]}tmp.bam'")
+    write_results(read_data, f'{cfg.args.out[:-4]}tmp.bam')
+    print("\n")
+
+    get_pileup_info()
+
+    with mp.Pool() as pool:
+        print('\n> computing consensus read realignments')
+        with cfg.read_count.get_lock(): cfg.read_count.value = 0
+        print(f"\r    0 reads realigned.", end='', flush=True)
+        read_data = pool.map(realign_read2, read_data)
+
     print(f"\n> saving results to '{cfg.args.out}'")
     write_results(read_data, cfg.args.out)
     print("\n")
@@ -149,4 +160,8 @@ def main():
 if __name__ == "__main__":
     parser = argparser()
     cfg.args = parser.parse_args()
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\nERROR: Program terminated.")
+        exit(1)

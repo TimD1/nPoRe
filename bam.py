@@ -296,6 +296,7 @@ def write_results(read_data, outfile):
                 cfg.results_count.value += 1
                 print(f"\r    {cfg.results_count.value} of {len(read_data)} alignments written.", end='', flush=True)
 
+    pysam.index(outfile)
     return
 
 
@@ -466,9 +467,9 @@ def calc_pileup_scores(range_tuple):
 
     # check that BAM exists, initialize
     try:
-        bam = pysam.AlignmentFile(cfg.args.bam, 'rb')
+        bam = pysam.AlignmentFile(f'{cfg.args.out[:-4]}tmp.bam', 'rb')
     except FileNotFoundError:
-        print(f"ERROR: BAM file '{cfg.args.bam}' not found.")
+        print(f"ERROR: BAM file '{cfg.args.out[:-4]}tmp.bam' not found.")
         exit(1)
 
     # iterate over all reference positions
@@ -859,9 +860,9 @@ def calc_max_inss(range_tuple):
 
     # check that BAM exists, initialize
     try:
-        bam = pysam.AlignmentFile(cfg.args.bam, 'rb')
+        bam = pysam.AlignmentFile(f'{cfg.args.out[:-4]}tmp.bam', 'rb')
     except FileNotFoundError:
-        print(f"ERROR: BAM file '{cfg.args.bam}' not found.")
+        print(f"ERROR: BAM file '{cfg.args.out[:-4]}tmp.bam' not found.")
         exit(1)
 
     # iterate over all reference positions
