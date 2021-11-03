@@ -8,39 +8,6 @@ from cig import *
 from bam import *
 import cfg as cfg
 
-def fix_vcf(vcf):
-
-    while True:
-        try:
-            file_open = open(vcf, 'a')
-            if file_open: break
-        except IOError:
-            pass
-    file_open.close()
-
-    if vcf[-3:] == ".gz":
-        subprocess.run([ "gunzip", "-f", vcf ])
-        vcf = vcf[:-3]
-
-    with open(vcf, 'r+') as vcf_file:
-        lines = vcf_file.readlines()
-        lines[2] = "##contig=<ID=chr19,length=58617616>\n"
-        vcf_file.seek(0)
-        vcf_file.writelines(lines)
-
-    while True:
-        try:
-            file_open = open(vcf, 'a')
-            if file_open: break
-        except IOError:
-            pass
-    file_open.close()
-
-    subprocess.run([ "sed", "-i", "-e", "s/END=0/\./g", vcf ])
-    subprocess.run([ "bgzip", "-f", vcf ])
-    subprocess.run([ "tabix", "-p", "vcf", vcf+".gz" ])
-
-
 def main():
 
     print(f"> splitting vcf")
@@ -58,33 +25,18 @@ def main():
     seq2, cig2 = apply_vcf(vcf2, ref)
 
     # package data
-    cigar1_data = ("1", "chr19", 0, 0, cig1, "="*len(ref), ref, ref, seq1, 1)
-    cigar2_data = ("2", "chr19", 0, 0, cig2, "="*len(ref), ref, ref, seq2, 2)
+    cigar1_data = ("1", "chr19", 0, 0, cig1, ref, seq1, 1)
+    cigar2_data = ("2", "chr19", 0, 0, cig2, ref, seq2, 2)
 
     print("> calculating score matrices")
-    subs, nps, inss ,dels = get_confusion_matrices()
-    cfg.args.sub_scores, cfg.args.np_scores, cfg.args.ins_scores, cfg.args.del_scores = calc_score_matrices(subs, nps, inss, dels)
+    subs, nps, inss, dels = get_confusion_matrices()
+    cfg.args.sub_scores, cfg.args.np_scores, \
+            cfg.args.ins_scores, cfg.args.del_scores = \
+            calc_score_matrices(subs, nps, inss, dels)
 
     print(f"> realigning hap sequences")
     with mp.Pool() as pool:
         data = pool.map(realign_read, [cigar1_data, cigar2_data])
-
-    # print(f"> saving CIGAR data")
-    # cigar1_data = data[0]
-    # cigar2_data = data[1]
-    # pickle.dump(cigar1_data, open('cigar1_data.pkl', 'wb'))
-    # pickle.dump(cigar2_data, open('cigar2_data.pkl', 'wb'))
-
-    # print(f"> loading CIGAR data")
-    # cigar1_data = pickle.load(open('cigar1_data.pkl', 'rb'))
-    # cigar2_data = pickle.load(open('cigar2_data.pkl', 'rb'))
-    # data = [cigar1_data, cigar2_data]
-
-    # print(f"\n> saving debug output to bam")
-    # hap_to_bam(cigar1_data, cfg.args.out+"pre")
-    # hap_to_bam(cigar2_data, cfg.args.out+"pre")
-    # subprocess.run(['samtools', 'index', f'{cfg.args.out}pre1.bam'])
-    # subprocess.run(['samtools', 'index', f'{cfg.args.out}pre2.bam'])
 
     print(f"\n> standardizing hap cigars")
     with cfg.read_count.get_lock(): cfg.read_count.value = 0
@@ -92,20 +44,6 @@ def main():
         data = pool.map(standardize_cigar, data)
     cigar1_data = data[0]
     cigar2_data = data[1]
-
-    # print(f"> saving CIGAR data")
-    # pickle.dump(cigar1_data, open('cigar1_data.pkl', 'wb'))
-    # pickle.dump(cigar2_data, open('cigar2_data.pkl', 'wb'))
-
-    # print(f"> loading CIGAR data")
-    # cigar1_data = pickle.load(open('cigar1_data.pkl', 'rb'))
-    # cigar2_data = pickle.load(open('cigar2_data.pkl', 'rb'))
-
-    # print(f"\n> saving debug output to bam")
-    # hap_to_bam(cigar1_data, cfg.args.out)
-    # hap_to_bam(cigar2_data, cfg.args.out)
-    # subprocess.run(['samtools', 'index', f'{cfg.args.out}1.bam'])
-    # subprocess.run(['samtools', 'index', f'{cfg.args.out}2.bam'])
 
     print('\n> generating standardized vcfs')
     vcf1 = gen_vcf(cigar1_data, cfg.args.out)

@@ -99,7 +99,8 @@ def extend_pysam_cigar(ops, counts):
 
 @cython.boundscheck(False)
 @cython.wraparound(False)
-cdef push_indels_right(char[::1] cigar, char[::1] seq, char[::1] nshifts_buf, char[::1] shiftlen_buf, char push_op):
+cdef push_indels_right(char[::1] cigar, char[::1] seq, char[::1] nshifts_buf, 
+        char[::1] shiftlen_buf, char push_op):
     ''' Push CIGAR indels rightwards. '''
     cdef char M = 0
     cdef char E = 7
@@ -159,7 +160,8 @@ cdef push_indels_right(char[::1] cigar, char[::1] seq, char[::1] nshifts_buf, ch
 
 @cython.boundscheck(False)
 @cython.wraparound(False)
-cdef push_indels_left(char[::1] cigar, char[::1] seq, char[::1] nshifts_buf, char[::1] shiftlen_buf, char push_op):
+cdef push_indels_left(char[::1] cigar, char[::1] seq, char[::1] nshifts_buf, 
+        char[::1] shiftlen_buf, char push_op):
     ''' Push CIGAR indels leftwards. '''
     cdef char M = 0
     cdef char E = 7
@@ -306,8 +308,7 @@ cpdef standardize_cigar(read_data):
     cdef char I = 1
     cdef char D = 2
 
-    read_id, ref_name, start, stop, \
-            cigar, hap_cigar, ref, hap_ref, seq, hap = read_data
+    read_id, ref_name, start, stop, cigar, ref, seq, hap = read_data
 
     # can optionally only report INDELs, assume substitutions found already
     if cfg.args.indel_cigar:
@@ -341,168 +342,4 @@ cpdef standardize_cigar(read_data):
         cfg.read_count.value += 1
         print(f"\r    {cfg.read_count.value} CIGARs standardized.", end='', flush=True)
 
-    return (read_id, ref_name, start, stop, 
-            new_cigar, hap_cigar, ref, hap_ref, seq, hap)
-
-
-
-def get_refseq_positions(cigar):
-    ref_poss = np.zeros(len(cigar))
-    seq_poss = np.zeros(len(cigar))
-    reflen = 0
-    seqlen = 0
-    for i, op in enumerate(cigar):
-        if op in 'SXI=M':
-            seqlen += 1
-        if op in 'XD=M':
-            reflen += 1
-        seq_poss[i] = seqlen
-        ref_poss[i] = reflen
-    return ref_poss, seq_poss
-
-
-
-@cython.boundscheck(False)
-@cython.wraparound(False)
-cpdef change_ref(read_cig_str, hap_cig_str, ref_str, read_str, hap_str):
-
-    # initialize data and pointers
-    # X used to denote end of CIGAR, continue until both ends reached
-    read_cig_str = read_cig_str.replace('=','M').replace('X','M') + 'N'
-    hap_cig_str = hap_cig_str.replace('=','M').replace('X','M') + 'N'
-
-    cdef char[::1] read_cig = cig_to_int(read_cig_str)
-    cdef char[::1] hap_cig = cig_to_int(hap_cig_str)
-
-    cdef char[::1] ref = bases_to_int(ref_str)
-    cdef char[::1] read = bases_to_int(read_str)
-    cdef char[::1] hap = bases_to_int(hap_str)
-
-    cdef char M = 0
-    cdef char I = 1
-    cdef char D = 2
-    cdef char N = 3
-    cdef char E = 7
-    cdef char X = 8
-
-    cdef int cig_ptr_read = 0
-    cdef int cig_ptr_hap = 0
-    cdef int ref_ptr_read = 0
-    cdef int ref_ptr_hap = 0
-    cdef int read_ptr = 0
-    cdef int hap_ptr = 0
-    cdef int i = 0
-
-    cdef char[::1] new_cig = np.zeros(len(read_cig)+len(hap_cig)+1, dtype=np.uint8)
-    cdef int consume_read_cig = 0
-    cdef int consume_hap_cig = 0
-
-    # step through both CIGARs, updating read alignment
-    while 1:
-
-        consume_read_cig = 0
-        consume_hap_cig = 0
-
-        # hap CIGAR 'M'
-        if hap_cig[cig_ptr_hap] == M and read_cig[cig_ptr_read] == M:
-            if read[read_ptr] == hap[hap_ptr]:
-                new_cig[i] = E; i += 1
-            else:
-                new_cig[i] = X; i += 1
-            consume_read_cig = 1
-            consume_hap_cig = 1
-        elif hap_cig[cig_ptr_hap] == M and read_cig[cig_ptr_read] == I:
-            new_cig[i] = I; i += 1
-            consume_read_cig = 1
-            consume_hap_cig = 0
-        elif hap_cig[cig_ptr_hap] == M and read_cig[cig_ptr_read] == D:
-            new_cig[i] = D; i += 1
-            consume_read_cig = 1
-            consume_hap_cig = 1
-        elif hap_cig[cig_ptr_hap] == M and read_cig[cig_ptr_read] == N:
-            new_cig[i] = D; i += 1
-            consume_read_cig = 0
-            consume_hap_cig = 1
-
-        # hap CIGAR I
-        elif hap_cig[cig_ptr_hap] == I and read_cig[cig_ptr_read] == M:
-            new_cig[i] = D; i += 1
-            consume_read_cig = 0
-            consume_hap_cig = 1
-        elif hap_cig[cig_ptr_hap] == I and read_cig[cig_ptr_read] == I:
-            if read[read_ptr] == hap[hap_ptr]:
-                new_cig[i] = E; i += 1
-            else:
-                new_cig[i] = X; i += 1
-            consume_read_cig = 1
-            consume_hap_cig = 1
-        elif hap_cig[cig_ptr_hap] == I and read_cig[cig_ptr_read] == D:
-            new_cig[i] = D; i += 1
-            consume_read_cig = 0
-            consume_hap_cig = 1
-        elif hap_cig[cig_ptr_hap] == I and read_cig[cig_ptr_read] == N:
-            new_cig[i] = D; i += 1
-            consume_read_cig = 0
-            consume_hap_cig = 1
-
-        # hap CIGAR D
-        elif hap_cig[cig_ptr_hap] == D and read_cig[cig_ptr_read] == M:
-            new_cig[i] = I; i += 1
-            consume_read_cig = 1
-            consume_hap_cig = 1
-        elif hap_cig[cig_ptr_hap] == D and read_cig[cig_ptr_read] == I:
-            new_cig[i] = I; i += 1
-            consume_read_cig = 1
-            consume_hap_cig = 0
-        elif hap_cig[cig_ptr_hap] == D and read_cig[cig_ptr_read] == D:
-            consume_read_cig = 1
-            consume_hap_cig = 1
-        elif hap_cig[cig_ptr_hap] == D and read_cig[cig_ptr_read] == N:
-            consume_read_cig = 0
-            consume_hap_cig = 1
-
-        # end of hap CIGAR
-        elif hap_cig[cig_ptr_hap] == N and read_cig[cig_ptr_read] == M:
-            new_cig[i] = I; i += 1
-            consume_read_cig = 1
-            consume_hap_cig = 0
-        elif hap_cig[cig_ptr_hap] == N and read_cig[cig_ptr_read] == I:
-            new_cig[i] = I; i += 1
-            consume_read_cig = 1
-            consume_hap_cig = 0
-        elif hap_cig[cig_ptr_hap] == N and read_cig[cig_ptr_read] == D:
-            consume_read_cig = 1
-            consume_hap_cig = 0
-        elif hap_cig[cig_ptr_hap] == N and read_cig[cig_ptr_read] == N:
-            return int_to_cig(new_cig[:i])
-
-        # update all pointers (based on consumed CIGAR operations)
-        if consume_read_cig: 
-            if read_cig[cig_ptr_read] == M:
-                ref_ptr_read += 1
-                read_ptr += 1
-            elif read_cig[cig_ptr_read] == I:
-                read_ptr += 1
-            elif read_cig[cig_ptr_read] == D:
-                ref_ptr_read += 1
-            elif read_cig[cig_ptr_read] == N:
-                print('ERROR: N is used to denote end, cannot be consumed!')
-                exit(1)
-            cig_ptr_read += 1
-        if consume_hap_cig: 
-            if hap_cig[cig_ptr_hap] == M:
-                ref_ptr_hap += 1
-                hap_ptr += 1
-            elif hap_cig[cig_ptr_hap] == I:
-                hap_ptr += 1
-            elif hap_cig[cig_ptr_hap] == D:
-                ref_ptr_hap += 1
-            elif hap_cig[cig_ptr_hap] == N:
-                print('ERROR: N is used to denote end, cannot be consumed!')
-                exit(1)
-            cig_ptr_hap += 1
-
-
-
-def flip_cigar_basis(cigar):
-    return cigar.replace('I', 'd').replace('D','i').upper()
+    return (read_id, ref_name, start, stop, new_cigar, cigar, ref, ref, seq, hap)

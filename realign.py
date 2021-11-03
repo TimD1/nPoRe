@@ -40,9 +40,6 @@ def argparser():
     parser.add_argument("--plot", action="store_true")
     parser.add_argument("--recalc_cms", action="store_true")
     parser.add_argument("--recalc_pileups", action="store_true")
-
-    parser.add_argument("--apply_vcf")
-    parser.add_argument("--min_qual", type=int, default=0)
     parser.add_argument("--indel_cigar", action="store_true")
 
     return parser
@@ -55,15 +52,14 @@ def main():
     os.makedirs(cfg.args.stats_dir, exist_ok=True)
     subs, nps, inss, dels = get_confusion_matrices()
 
-    if cfg.args.plot:
-        print("> plotting confusion matrices")
-        plot_confusion_matrices(subs, nps, inss, dels)
-
     print("> calculating score matrices")
     cfg.args.sub_scores, cfg.args.np_scores, cfg.args.ins_scores, cfg.args.del_scores = \
             calc_score_matrices(subs, nps, inss, dels)
 
     if cfg.args.plot:
+        print("> plotting confusion matrices")
+        plot_confusion_matrices(subs, nps, inss, dels)
+
         print("> plotting score matrices")
         plot_np_score_matrices(cfg.args.np_scores)
         exit(0)
@@ -73,64 +69,8 @@ def main():
     read_data = get_read_data(cfg.args.bam)
     print(f'\t{runtime: {perf_counter()-start:.2f}s')
 
-    if cfg.args.apply_vcf:
-        print(f"\n> splitting vcf '{cfg.args.apply_vcf}'")
-        vcf1, vcf2 = split_vcf(cfg.args.apply_vcf, 
-                f"{os.extsep.join(cfg.args.apply_vcf.split(os.extsep)[:-2])}", True)
-
-        print(f"> indexing '{vcf1}' and\n        '{vcf2}'")
-        subprocess.run(['tabix', '-p', 'vcf', vcf1])
-        subprocess.run(['tabix', '-p', 'vcf', vcf2])
-
-        print(f"> reading reference: '{cfg.args.ref}'")
-        cfg.args.reference = get_fasta(cfg.args.ref, cfg.args.contig)
-
-        print(f"> applying '{vcf1}' to reference")
-        cfg.args.hap1, cfg.args.hap1_cig = apply_vcf(vcf1, cfg.args.reference)
-        print(f"> applying '{vcf2}' to reference")
-        cfg.args.hap2, cfg.args.hap2_cig = apply_vcf(vcf2, cfg.args.reference)
-
-        print(f"> standardizing haplotype cigars")
-        _, _, _, _, _, cfg.args.hap1_cig, _, _, _, _ = \
-                standardize_cigar(("1", "chr19", 0, 0, "", cfg.args.hap1_cig, 
-                    cfg.args.reference, "", cfg.args.hap1, 2))
-        _, _, _, _, _, cfg.args.hap2_cig, _, _, _, _ = \
-                standardize_cigar(("2", "chr19", 0, 0, "", cfg.args.hap2_cig, 
-                    cfg.args.reference, "", cfg.args.hap2, 2))
-        print('')
-
-        print(f"> precomputing haplotype positions")
-        cfg.args.ref_poss_hap1, cfg.args.hap1_poss = \
-                get_refseq_positions(cfg.args.hap1_cig)
-        cfg.args.ref_poss_hap2, cfg.args.hap2_poss = \
-                get_refseq_positions(cfg.args.hap2_cig)
-
-        cigar1_data = ("1", "chr19", 0, 0, cfg.args.hap1_cig, \
-                "="*len(cfg.args.reference), cfg.args.reference, \
-                cfg.args.reference, cfg.args.hap1, 1)
-        cigar2_data = ("2", "chr19", 0, 0, cfg.args.hap2_cig, \
-                "="*len(cfg.args.reference), cfg.args.reference, \
-                cfg.args.reference, cfg.args.hap2, 2)
-
-        print(f"> saving debug output to bam")
-        hap_to_bam(cigar1_data, cfg.args.out[:-9]+"hap")
-        hap_to_bam(cigar2_data, cfg.args.out[:-9]+"hap")
-        subprocess.run(['samtools', 'index', f'{cfg.args.out[:-9]}hap1.bam'])
-        subprocess.run(['samtools', 'index', f'{cfg.args.out[:-9]}hap2.bam'])
-    else: print(' ')
-
     with cfg.read_count.get_lock(): cfg.read_count.value = 0
     with mp.Pool() as pool:
-
-        print('> adding haplotype data to reads')
-        start = perf_counter()
-        read_data = list(filter(None, pool.map(add_haplotype_data, read_data)))
-        print(f'\n\t{runtime: {perf_counter()-start}s')
-
-        if cfg.args.apply_vcf:
-            print('> changing read basis ref->hap')
-            with cfg.read_count.get_lock(): cfg.read_count.value = 0
-            read_data = pool.map(to_haplotype_ref, read_data)
 
         print('> computing individual read realignments')
         with cfg.read_count.get_lock(): cfg.read_count.value = 0
@@ -138,11 +78,6 @@ def main():
         print(f"\r    0 reads realigned.", end='', flush=True)
         read_data = pool.map(realign_read, read_data)
         print(f'\n\t{runtime: {perf_counter()-start:.2f}s')
-
-        if cfg.args.apply_vcf:
-            print('> changing read basis hap->ref')
-            with cfg.read_count.get_lock(): cfg.read_count.value = 0
-            read_data = pool.map(from_haplotype_ref, read_data)
 
         with cfg.read_count.get_lock(): cfg.read_count.value = 0
         print('> converting to standard CIGAR format')

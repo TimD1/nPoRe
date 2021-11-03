@@ -6,82 +6,39 @@ from cig import *
 from util import *
 import cfg
 
-def get_vcf_data():
-    '''
-    Parse VCF file into just sub information:
-    { 'ctg1': [ [(posX, baseX)...],     < unknown haplotype (homozygous subs only)
-                [(posY, baseY)...],     < hap1
-                [(posZ, baseZ)...]]     < hap2
-      'ctg2': ...
-    }
-    '''
 
-    # count snps
-    vcf_file = pysam.VariantFile(cfg.args.apply_vcf, 'r')
-    snps = None
-    if cfg.args.contig:
-        snps = vcf_file.fetch(
-                    cfg.args.contig, 
-                    cfg.args.contig_beg, 
-                    cfg.args.contig_end)
-    else:
-        snps = vcf_file.fetch()
-    n = sum(1 for _ in snps)
+def fix_vcf(vcf):
 
-    # get all snps in region of interest
-    if cfg.args.contig:
-        snps = vcf_file.fetch(
-                    cfg.args.contig, 
-                    cfg.args.contig_beg, 
-                    cfg.args.contig_end)
-    else:
-        snps = vcf_file.fetch()
+    while True:
+        try:
+            file_open = open(vcf, 'a')
+            if file_open: break
+        except IOError:
+            pass
+    file_open.close()
 
-    vcf_dict = {}
-    print(f'\r    0 of {n} SNPs processed.', end='', flush=True)
-    for i, snp in enumerate(snps):
-        if snp.qual > cfg.args.min_qual:
-            gt = None
-            for sample in snp.samples:
-                gts = snp.samples[sample]['GT']
-                break
+    if vcf[-3:] == ".gz":
+        subprocess.run([ "gunzip", "-f", vcf ])
+        vcf = vcf[:-3]
 
-            if snp.contig not in vcf_dict:
-                vcf_dict[snp.contig] = [ [], [], [] ]
+    with open(vcf, 'r+') as vcf_file:
+        lines = vcf_file.readlines()
+        lines[2] = "##contig=<ID=chr19,length=58617616>\n"
+        vcf_file.seek(0)
+        vcf_file.writelines(lines)
 
-            # homo vars
-            if len(snp.alleles) == 2:
-                if len(snp.alleles[0]) == 1 and len(snp.alleles[1]) == 1:
-                    if gts[0]: # hap1
-                        vcf_dict[snp.contig][1].append((snp.start, snp.alleles[1]))
-                    if gts[1]: # hap2
-                        vcf_dict[snp.contig][2].append((snp.start, snp.alleles[1]))
-                    if gts[0] and gts[1]: # unknown hap
-                        vcf_dict[snp.contig][0].append((snp.start, snp.alleles[1]))
+    while True:
+        try:
+            file_open = open(vcf, 'a')
+            if file_open: break
+        except IOError:
+            pass
+    file_open.close()
 
-            # hetero vars
-            elif len(snp.alleles) == 3:
-                if len(snp.alleles[1]) == len(snp.alleles[0]):
-                    for hap_idx, gt in enumerate(gts):
-                        if gt == 1:
-                            vcf_dict[snp.contig][hap_idx].append((snp.start, snp.alleles[1][0]))
-                if len(snp.alleles[2]) == len(snp.alleles[0]):
-                    for hap_idx, gt in enumerate(gts):
-                        if gt == 2:
-                            vcf_dict[snp.contig][hap_idx].append((snp.start, snp.alleles[2][0]))
-        print(f'\r    {i+1} of {n} SNPs processed.', end='', flush=True)
+    subprocess.run([ "sed", "-i", "-e", "s/END=0/\./g", vcf ])
+    subprocess.run([ "bgzip", "-f", vcf ])
+    subprocess.run([ "tabix", "-p", "vcf", vcf+".gz" ])
 
-    # warn user if VCF is unphased. I've fallen for this twice now
-    unphased = True
-    for contig in vcf_dict:
-        if vcf_dict[contig][0] != vcf_dict[contig][1]:
-            unphased = False
-    if unphased:
-        print(f"WARNING: VCF file '{cfg.args.apply_vcf}' may be unphased.\n" + \
-               "As a result, SNP splicing will not be correct."
-                )
-
-    return vcf_dict
 
 
 def split_vcf(vcf_fn, vcf_out_pre='', filter_unphased=False):
@@ -168,7 +125,6 @@ def split_vcf(vcf_fn, vcf_out_pre='', filter_unphased=False):
             pass # ignore, same as ref
 
         else: # PySAM error, consider it homozygous variant
-            # print(f"ERROR: no variant: {record.pos} {record.alleles} {gt}")
             # TODO: file bug in PySam repo?
             record1 = record.copy()
             for sample in record1.samples:
@@ -331,10 +287,6 @@ def apply_vcf(vcf_fn, ref):
             cig += 'D' * indel_len
             ref_ptr += indel_len
 
-        # print(f'pos: {pos}, len(seq): {len(seq)} seq_len(cig): {seq_len(cig)}, alleles: {record.alleles}')
-        # if seq_len(cig) != len(seq) or ref_len(cig) != len_ref:
-        #     input()
-
     # add remaining (all matches)
     cig += '=' * (len_ref - ref_ptr)
     seq += ref[ref_ptr:]
@@ -345,7 +297,7 @@ def apply_vcf(vcf_fn, ref):
 
 def gen_vcf(read_data, vcf_out_pre = ''):
 
-    hap_id, ctg_name, start, stop, cigar, hap_cigar, ref, hap_ref, seq, hap = read_data
+    hap_id, ctg_name, start, stop, cigar, ref, seq, hap = read_data
 
     # create VCF header
     vcf_header = pysam.VariantHeader()
@@ -436,7 +388,7 @@ def gen_vcf(read_data, vcf_out_pre = ''):
             vcf_out.write(record)
             seq_ptr += ins_len
         else:
-            print(f"ERROR: unrecognized CIGAR operation '{cigar[cig_ptr]}'")
+            print(f"\nERROR: unrecognized CIGAR operation '{cigar[cig_ptr]}'")
             exit(1)
     vcf_out.close()
 
