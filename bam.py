@@ -1,6 +1,7 @@
 import multiprocessing as mp
 import os, re, itertools, sys
 from bisect import bisect_left, bisect_right
+from time import perf_counter
 
 import pysam
 import numpy as np
@@ -98,7 +99,7 @@ def get_read_data(bam_fn):
     try:
         bam = pysam.AlignmentFile(bam_fn, 'rb')
     except FileNotFoundError:
-        print(f"ERROR: BAM file '{bam_fn}' not found.")
+        print(f"\nERROR: BAM file '{bam_fn}' not found.")
         exit(1)
 
     reads = None
@@ -229,7 +230,7 @@ def get_padded_cigar(cigar, ref_start, ref_stop):
             padded_cigar += cig
             ref_idx += 1
         else:
-            print("ERROR: unexpected CIGAR in 'get_padded_cigar()'")
+            print("\nERROR: unexpected CIGAR in 'get_padded_cigar()'")
 
     assert(ref_idx == ref_stop)
     return padded_cigar
@@ -241,11 +242,14 @@ def write_results(read_data, outfile):
     Write a `.bam` file for a set of alignments.
     '''
     print("> creating BAM index")
+    start = perf_counter()
     bam = pysam.AlignmentFile(cfg.args.bam, 'rb')
     bam_index = pysam.IndexedReads(bam)
     bam_index.build()
+    print(f'\t{runtime: {perf_counter()-start:.2f}s')
 
     print("> writing results")
+    start = perf_counter()
     header = { 'HD': {
                    'VN': '1.6', 
                    'SO': 'coordinate'
@@ -273,7 +277,7 @@ def write_results(read_data, outfile):
                     old_alignment = next(aln_itr)
 
             except (KeyError, StopIteration) as e:
-                print(f"ERROR: could not find primary read {read_id} in BAM file '{cfg.args.bam}'.")
+                print(f"\nERROR: could not find primary read {read_id} in BAM file '{cfg.args.bam}'.")
                 exit(1)
 
             # overwrite CIGAR string
@@ -297,6 +301,7 @@ def write_results(read_data, outfile):
                 print(f"\r    {cfg.results_count.value} of {len(read_data)} alignments written.", end='', flush=True)
 
     pysam.index(outfile)
+    print(f'\n\t{runtime: {perf_counter()-start:.2f}s')
     return
 
 
@@ -433,17 +438,18 @@ def get_pileup_scores():
 
     else:
         print("> calculating pileup scores")
+        start = perf_counter()
         reflen = len(cfg.args.reference)
         with cfg.pos_count.get_lock():
             cfg.pos_count.value = 0
-        print(f"0 of {(reflen+cfg.args.chunk_width-1)//cfg.args.chunk_width}"
+        print(f"\t0 of {(reflen+cfg.args.chunk_width-1)//cfg.args.chunk_width}"
                 f" chunks processed.", end='', flush=True)
 
         ranges = get_ranges(0, reflen)
         with mp.Pool() as pool: # multi-threaded
             results = list(pool.map(calc_pileup_scores, ranges))
         pileup_scores = np.concatenate(results, axis=2)
-        print(" ")
+        print(f'\n\t{runtime: {perf_counter()-start:.2f}s')
         np.save(f'{cfg.args.stats_dir}/pileup_scores', pileup_scores)
 
     return pileup_scores
@@ -469,7 +475,7 @@ def calc_pileup_scores(range_tuple):
     try:
         bam = pysam.AlignmentFile(f'{cfg.args.out[:-4]}tmp.bam', 'rb')
     except FileNotFoundError:
-        print(f"ERROR: BAM file '{cfg.args.out[:-4]}tmp.bam' not found.")
+        print(f"\nERROR: BAM file '{cfg.args.out[:-4]}tmp.bam' not found.")
         exit(1)
 
     # iterate over all reference positions
@@ -526,7 +532,7 @@ def calc_pileup_scores(range_tuple):
                 read_move = True
                 ref_move = True
             else:
-                print(f"ERROR: unexpected CIGAR type for {read.query_name}")
+                print(f"\nERROR: unexpected CIGAR type for {read.query_name}")
                 exit(1)
 
             if ref_idx >= read_start:
@@ -567,7 +573,7 @@ def calc_pileup_scores(range_tuple):
 
     with cfg.pos_count.get_lock():
         cfg.pos_count.value += 1
-        print(f"\r{cfg.pos_count.value} of "
+        print(f"\r\t{cfg.pos_count.value} of "
             f"{(len(cfg.args.reference)+cfg.args.chunk_width-1)//cfg.args.chunk_width}"
             f" chunks processed.", end='', flush=True)
 
@@ -593,14 +599,15 @@ def get_max_inss():
         reflen = len(cfg.args.reference)
         with cfg.pos_count.get_lock():
             cfg.pos_count.value = 0
-        print(f"0 of {(reflen+cfg.args.chunk_width-1)//cfg.args.chunk_width}"
+        print(f"\t0 of {(reflen+cfg.args.chunk_width-1)//cfg.args.chunk_width}"
                 f" chunks processed.", end='', flush=True)
 
         ranges = get_ranges(0, reflen)
+        start = perf_counter()
         with mp.Pool() as pool: # multi-threaded
             results = list(pool.map(calc_max_inss, ranges))
         max_inss = np.concatenate(results, axis=None)
-        print(" ")
+        print(f'\n\t{runtime: {perf_counter()-start:.2f}s')
         np.save(f'{cfg.args.stats_dir}/max_inss', max_inss)
 
     return max_inss
@@ -713,7 +720,7 @@ def calc_confusion_matrices(range_tuple):
     try:
         bam = pysam.AlignmentFile(cfg.args.bam, 'rb')
     except FileNotFoundError:
-        print(f"ERROR: BAM file '{cfg.args.bam}' not found.")
+        print(f"\nERROR: BAM file '{cfg.args.bam}' not found.")
         exit(1)
 
     # iterate over all reference positions
@@ -776,7 +783,7 @@ def calc_confusion_matrices(range_tuple):
                 read_move = True
                 ref_move = True
             else:
-                print(f"ERROR: unexpected CIGAR type for {read.query_name}")
+                print(f"\nERROR: unexpected CIGAR type for {read.query_name}")
                 exit(1)
 
             if ref_idx > read_start and cigar != Cigar.S and cigar != Cigar.H:
@@ -862,7 +869,7 @@ def calc_max_inss(range_tuple):
     try:
         bam = pysam.AlignmentFile(f'{cfg.args.out[:-4]}tmp.bam', 'rb')
     except FileNotFoundError:
-        print(f"ERROR: BAM file '{cfg.args.out[:-4]}tmp.bam' not found.")
+        print(f"\nERROR: BAM file '{cfg.args.out[:-4]}tmp.bam' not found.")
         exit(1)
 
     # iterate over all reference positions
@@ -907,7 +914,7 @@ def calc_max_inss(range_tuple):
                 read_move = True
                 ref_move = True
             else:
-                print(f"ERROR: unexpected CIGAR type for {read.query_name}")
+                print(f"\nERROR: unexpected CIGAR type for {read.query_name}")
                 exit(1)
 
             if ref_idx >= read_start and cigar == Cigar.I:
@@ -922,7 +929,7 @@ def calc_max_inss(range_tuple):
 
     with cfg.pos_count.get_lock():
         cfg.pos_count.value += 1
-        print(f"\r{cfg.pos_count.value} of "
+        print(f"\r\t{cfg.pos_count.value} of "
             f"{(len(cfg.args.reference)+cfg.args.chunk_width-1)//cfg.args.chunk_width}"
             f" chunks processed.", end='', flush=True)
 

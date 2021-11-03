@@ -1,6 +1,7 @@
 import argparse, os, subprocess
 import numpy as np
 from collections import defaultdict
+from time import perf_counter
 
 import pysam
 
@@ -50,6 +51,7 @@ def argparser():
 
 def main():
 
+    print("> loading confusion matrices")
     os.makedirs(cfg.args.stats_dir, exist_ok=True)
     subs, nps, inss, dels = get_confusion_matrices()
 
@@ -67,7 +69,9 @@ def main():
         exit(0)
 
     print('> extracting read data from BAM')
+    start = perf_counter()
     read_data = get_read_data(cfg.args.bam)
+    print(f'\t{runtime: {perf_counter()-start:.2f}s')
 
     if cfg.args.apply_vcf:
         print(f"\n> splitting vcf '{cfg.args.apply_vcf}'")
@@ -115,43 +119,51 @@ def main():
         subprocess.run(['samtools', 'index', f'{cfg.args.out[:-9]}hap2.bam'])
     else: print(' ')
 
-    print('> adding haplotype data to reads')
     with cfg.read_count.get_lock(): cfg.read_count.value = 0
     with mp.Pool() as pool:
+
+        print('> adding haplotype data to reads')
+        start = perf_counter()
         read_data = list(filter(None, pool.map(add_haplotype_data, read_data)))
+        print(f'\n\t{runtime: {perf_counter()-start}s')
 
         if cfg.args.apply_vcf:
-            print('\n> changing read basis ref->hap')
+            print('> changing read basis ref->hap')
             with cfg.read_count.get_lock(): cfg.read_count.value = 0
             read_data = pool.map(to_haplotype_ref, read_data)
 
-        print('\n> computing individual read realignments')
+        print('> computing individual read realignments')
         with cfg.read_count.get_lock(): cfg.read_count.value = 0
+        start = perf_counter()
         print(f"\r    0 reads realigned.", end='', flush=True)
         read_data = pool.map(realign_read, read_data)
+        print(f'\n\t{runtime: {perf_counter()-start:.2f}s')
 
         if cfg.args.apply_vcf:
-            print('\n> changing read basis hap->ref')
+            print('> changing read basis hap->ref')
             with cfg.read_count.get_lock(): cfg.read_count.value = 0
             read_data = pool.map(from_haplotype_ref, read_data)
 
         with cfg.read_count.get_lock(): cfg.read_count.value = 0
-        print('\n> converting to standard CIGAR format')
+        print('> converting to standard CIGAR format')
+        start = perf_counter()
         read_data = pool.map(standardize_cigar, read_data)
+        print(f'\n\t{runtime: {perf_counter()-start:.2f}s')
 
-    print(f"\n> saving intermediary results to '{cfg.args.out[:-4]}tmp.bam'")
+    print(f"> saving intermediary results to '{cfg.args.out[:-4]}tmp.bam'")
     write_results(read_data, f'{cfg.args.out[:-4]}tmp.bam')
-    print("\n")
 
     get_pileup_info()
 
     with mp.Pool() as pool:
-        print('\n> computing consensus read realignments')
+        print('> computing consensus read realignments')
+        start = perf_counter()
         with cfg.read_count.get_lock(): cfg.read_count.value = 0
         print(f"\r    0 reads realigned.", end='', flush=True)
         read_data = pool.map(realign_read2, read_data)
+        print(f'\n\t{runtime: {perf_counter()-start:.2f}s')
 
-    print(f"\n> saving results to '{cfg.args.out}'")
+    print(f"> saving results to '{cfg.args.out}'")
     write_results(read_data, cfg.args.out)
     print("\n")
 
