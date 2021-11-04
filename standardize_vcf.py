@@ -46,15 +46,15 @@ def main():
     cigar2_data = data[1]
 
     print('\n> generating standardized vcfs')
-    vcf1 = gen_vcf(cigar1_data, cfg.args.out)
-    vcf2 = gen_vcf(cigar2_data, cfg.args.out)
+    vcf1 = gen_vcf(cigar1_data, cfg.args.out_prefix)
+    vcf2 = gen_vcf(cigar2_data, cfg.args.out_prefix)
 
     print(f"> indexing vcfs")
     fix_vcf(vcf1)
     fix_vcf(vcf2)
 
     print(f"> merging vcfs")
-    out_fn = f"{cfg.args.out}.vcf.gz"
+    out_fn = f"{cfg.args.out_prefix}.vcf.gz"
     merge_vcfs(vcf1, vcf2, out_fn)
     subprocess.run(['tabix', '-p', 'vcf', out_fn])
 
@@ -68,7 +68,7 @@ def argparser():
 
     parser.add_argument("vcf", type=str)
     parser.add_argument("ref", type=str)
-    parser.add_argument("out", type=str)
+    parser.add_argument("out_prefix", type=str)
 
     parser.add_argument("--contig", type=str)
     parser.add_argument("--contig_beg", type=int)

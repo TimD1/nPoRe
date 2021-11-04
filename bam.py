@@ -119,8 +119,9 @@ def realign_read2(read_data):
         int_seq[i] = cfg.base_dict[seq[i]]
 
     # align
+    # NOTE: considering unphased (hap0) reads to be hap1
     new_cigar = align2(int_ref, int_seq, ref_start, 
-            padded_cigar, hap-1, cfg.args.pileup_scores)
+            padded_cigar, max(0, hap-1), cfg.args.pileup_scores)
 
     with cfg.read_count.get_lock():
         cfg.read_count.value += 1
@@ -166,7 +167,7 @@ def write_results(read_data, outfile):
     bam = pysam.AlignmentFile(cfg.args.bam, 'rb')
     bam_index = pysam.IndexedReads(bam)
     bam_index.build()
-    print(f'\t{runtime: {perf_counter()-start:.2f}s')
+    print(f'    runtime: {perf_counter()-start:.2f}s')
 
     print("> writing results")
     start = perf_counter()
@@ -185,7 +186,7 @@ def write_results(read_data, outfile):
              }
     with pysam.Samfile(outfile, 'wb', header=header) as fh:
 
-        for read_id, refname, start, end, cigar, ref, seq, hap in read_data:
+        for read_id, refname, read_start, read_end, cigar, ref, seq, hap in read_data:
 
             # find corresponding read in original BAM
             try:
@@ -221,7 +222,7 @@ def write_results(read_data, outfile):
                 print(f"\r    {cfg.results_count.value} of {len(read_data)} alignments written.", end='', flush=True)
 
     pysam.index(outfile)
-    print(f'\n\t{runtime: {perf_counter()-start:.2f}s')
+    print(f'\n    runtime: {perf_counter()-start:.2f}s')
     return
 
 
@@ -326,14 +327,14 @@ def get_pileup_scores():
         reflen = len(cfg.args.reference)
         with cfg.pos_count.get_lock():
             cfg.pos_count.value = 0
-        print(f"\t0 of {(reflen+cfg.args.chunk_width-1)//cfg.args.chunk_width}"
+        print(f"    0 of {(reflen+cfg.args.chunk_width-1)//cfg.args.chunk_width}"
                 f" chunks processed.", end='', flush=True)
 
         ranges = get_ranges(0, reflen)
         with mp.Pool() as pool: # multi-threaded
             results = list(pool.map(calc_pileup_scores, ranges))
         pileup_scores = np.concatenate(results, axis=2)
-        print(f'\n\t{runtime: {perf_counter()-start:.2f}s')
+        print(f'\n    runtime: {perf_counter()-start:.2f}s')
         np.save(f'{cfg.args.stats_dir}/pileup_scores', pileup_scores)
 
     return pileup_scores
@@ -355,11 +356,18 @@ def calc_pileup_scores(range_tuple):
     pileups = np.zeros((2, 6, pileup_end_idx-pileup_start_idx), 
             dtype=np.float32) + BIAS
 
+    # for positions with zero coverage, consider ref to be a single read
+    for hap in range(2):
+        for pileup_idx in range(pileup_start_idx, pileup_end_idx):
+            pileups[hap, 
+                    cfg.base_dict[cfg.args.padded_ref[pileup_idx]], 
+                    pileup_idx-pileup_start_idx] += 1
+
     # check that BAM exists, initialize
     try:
-        bam = pysam.AlignmentFile(f'{cfg.args.out[:-4]}tmp.bam', 'rb')
+        bam = pysam.AlignmentFile(f'{cfg.args.out_prefix}{cfg.args.itr}.bam', 'rb')
     except FileNotFoundError:
-        print(f"\nERROR: BAM file '{cfg.args.out[:-4]}tmp.bam' not found.")
+        print(f"\nERROR: BAM file '{cfg.args.out_prefix}{cfg.args.itr}.bam' not found.")
         exit(1)
 
     # iterate over all reference positions
@@ -371,6 +379,7 @@ def calc_pileup_scores(range_tuple):
             # throwing error due to NoneType, checking for None fails...
             continue
 
+        # ignore unphased reads for this
         hap = None
         if read.has_tag('HP'):
             hap = read.get_tag('HP')-1
@@ -457,7 +466,7 @@ def calc_pileup_scores(range_tuple):
 
     with cfg.pos_count.get_lock():
         cfg.pos_count.value += 1
-        print(f"\r\t{cfg.pos_count.value} of "
+        print(f"\r    {cfg.pos_count.value} of "
             f"{(len(cfg.args.reference)+cfg.args.chunk_width-1)//cfg.args.chunk_width}"
             f" chunks processed.", end='', flush=True)
 
@@ -483,7 +492,7 @@ def get_max_inss():
         reflen = len(cfg.args.reference)
         with cfg.pos_count.get_lock():
             cfg.pos_count.value = 0
-        print(f"\t0 of {(reflen+cfg.args.chunk_width-1)//cfg.args.chunk_width}"
+        print(f"    0 of {(reflen+cfg.args.chunk_width-1)//cfg.args.chunk_width}"
                 f" chunks processed.", end='', flush=True)
 
         ranges = get_ranges(0, reflen)
@@ -491,7 +500,7 @@ def get_max_inss():
         with mp.Pool() as pool: # multi-threaded
             results = list(pool.map(calc_max_inss, ranges))
         max_inss = np.concatenate(results, axis=None)
-        print(f'\n\t{runtime: {perf_counter()-start:.2f}s')
+        print(f'\n    runtime: {perf_counter()-start:.2f}s')
         np.save(f'{cfg.args.stats_dir}/max_inss', max_inss)
 
     return max_inss
@@ -751,9 +760,9 @@ def calc_max_inss(range_tuple):
 
     # check that BAM exists, initialize
     try:
-        bam = pysam.AlignmentFile(f'{cfg.args.out[:-4]}tmp.bam', 'rb')
+        bam = pysam.AlignmentFile(f'{cfg.args.out_prefix}{cfg.args.itr}.bam', 'rb')
     except FileNotFoundError:
-        print(f"\nERROR: BAM file '{cfg.args.out[:-4]}tmp.bam' not found.")
+        print(f"\nERROR: BAM file '{cfg.args.out_prefix}{cfg.args.itr}.bam' not found.")
         exit(1)
 
     # iterate over all reference positions
@@ -813,7 +822,7 @@ def calc_max_inss(range_tuple):
 
     with cfg.pos_count.get_lock():
         cfg.pos_count.value += 1
-        print(f"\r\t{cfg.pos_count.value} of "
+        print(f"\r    {cfg.pos_count.value} of "
             f"{(len(cfg.args.reference)+cfg.args.chunk_width-1)//cfg.args.chunk_width}"
             f" chunks processed.", end='', flush=True)
 

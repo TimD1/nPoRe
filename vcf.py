@@ -1,6 +1,6 @@
 import pysam
 from collections import defaultdict
-import os
+import os, subprocess
 
 from cig import *
 from util import *

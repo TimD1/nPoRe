@@ -354,7 +354,7 @@ cdef int match(char[::1] A, char[::1] B):
 @cython.cdivision(True)
 cpdef align(char[::1] full_ref, char[::1] seq, str cigar, 
         float[:,::1] sub_scores, float[:,:,::1] np_scores, 
-        float indel_start=5, float indel_extend=1, int max_b_rows = 20000,
+        float indel_start=5, float indel_extend=2, int max_b_rows = 20000,
         int r = 30, int verbose=0):
     ''' Perform alignment.  '''
 

@@ -342,4 +342,4 @@ cpdef standardize_cigar(read_data):
         cfg.read_count.value += 1
         print(f"\r    {cfg.read_count.value} CIGARs standardized.", end='', flush=True)
 
-    return (read_id, ref_name, start, stop, new_cigar, cigar, ref, ref, seq, hap)
+    return (read_id, ref_name, start, stop, new_cigar, ref, seq, hap)
