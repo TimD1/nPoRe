@@ -5,9 +5,7 @@ from collections import defaultdict
 args = None
 
 # counter (for in-progress printing)
-pos_count = mp.Value('i', 0)
-read_count = mp.Value('i', 0)
-results_count = mp.Value('i', 0)
+counter = mp.Value('i', 0)
 
 # global enum for bases ACGT
 bases = 'NACGT'

@@ -338,8 +338,8 @@ cpdef standardize_cigar(read_data):
 
     new_cigar = int_to_cig(int_cig).replace('ID','M')
 
-    with cfg.read_count.get_lock():
-        cfg.read_count.value += 1
-        print(f"\r    {cfg.read_count.value} CIGARs standardized.", end='', flush=True)
+    with cfg.counter.get_lock():
+        cfg.counter.value += 1
+        print(f"\r    {cfg.counter.value} CIGARs standardized.", end='', flush=True)
 
     return (read_id, ref_name, start, stop, new_cigar, ref, seq, hap)

@@ -39,7 +39,7 @@ def main():
         data = pool.map(realign_read, [cigar1_data, cigar2_data])
 
     print(f"\n> standardizing hap cigars")
-    with cfg.read_count.get_lock(): cfg.read_count.value = 0
+    with cfg.counter.get_lock(): cfg.counter.value = 0
     with mp.Pool() as pool:
         data = pool.map(standardize_cigar, data)
     cigar1_data = data[0]

@@ -71,17 +71,17 @@ def main():
     read_data = get_read_data(cfg.args.bam)
     print(f'\n    runtime: {perf_counter()-start:.2f}s')
 
-    with cfg.read_count.get_lock(): cfg.read_count.value = 0
+    with cfg.counter.get_lock(): cfg.counter.value = 0
     with mp.Pool() as pool:
 
         print('> computing individual read realignments')
-        with cfg.read_count.get_lock(): cfg.read_count.value = 0
+        with cfg.counter.get_lock(): cfg.counter.value = 0
         start = perf_counter()
         print(f"\r    0 reads realigned.", end='', flush=True)
         read_data = pool.map(realign_read, read_data)
         print(f'\n    runtime: {perf_counter()-start:.2f}s')
 
-        with cfg.read_count.get_lock(): cfg.read_count.value = 0
+        with cfg.counter.get_lock(): cfg.counter.value = 0
         print('> converting to standard CIGAR format')
         start = perf_counter()
         read_data = pool.map(standardize_cigar, read_data)
@@ -98,7 +98,7 @@ def main():
         with mp.Pool() as pool:
             print(f'> computing consensus read realignments, iteration {cfg.args.itr}')
             start = perf_counter()
-            with cfg.read_count.get_lock(): cfg.read_count.value = 0
+            with cfg.counter.get_lock(): cfg.counter.value = 0
             print(f"\r    0 reads realigned.", end='', flush=True)
             read_data = pool.map(realign_read2, read_data)
             print(f'\n    runtime: {perf_counter()-start:.2f}s')

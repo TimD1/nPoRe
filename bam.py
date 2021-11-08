@@ -89,9 +89,9 @@ def realign_read(read_data):
     # align
     new_cigar = align(int_ref, int_seq, cigar, cfg.args.sub_scores, cfg.args.np_scores)
 
-    with cfg.read_count.get_lock():
-        cfg.read_count.value += 1
-        print(f"\r    {cfg.read_count.value} reads realigned.", end='', flush=True)
+    with cfg.counter.get_lock():
+        cfg.counter.value += 1
+        print(f"\r    {cfg.counter.value} reads realigned.", end='', flush=True)
 
     return (read_id, ref_name, start, stop, new_cigar, ref, seq, hap)
 
@@ -123,9 +123,9 @@ def realign_read2(read_data):
     new_cigar = align2(int_ref, int_seq, ref_start, 
             padded_cigar, max(0, hap-1), cfg.args.pileup_scores)
 
-    with cfg.read_count.get_lock():
-        cfg.read_count.value += 1
-        print(f"\r    {cfg.read_count.value} reads realigned.", end='', flush=True)
+    with cfg.counter.get_lock():
+        cfg.counter.value += 1
+        print(f"\r    {cfg.counter.value} reads realigned.", end='', flush=True)
 
     return (read_id, ref_name, start, stop, new_cigar, ref, seq, hap)
 
@@ -217,9 +217,9 @@ def write_results(read_data, outfile):
             fh.write(new_alignment)
 
             # print progress
-            with cfg.results_count.get_lock():
-                cfg.results_count.value += 1
-                print(f"\r    {cfg.results_count.value} of {len(read_data)} alignments written.", end='', flush=True)
+            with cfg.counter.get_lock():
+                cfg.counter.value += 1
+                print(f"\r    {cfg.counter.value} of {len(read_data)} alignments written.", end='', flush=True)
 
     pysam.index(outfile)
     print(f'\n    runtime: {perf_counter()-start:.2f}s')
@@ -325,8 +325,8 @@ def get_pileup_scores():
         print("> calculating pileup scores")
         start = perf_counter()
         reflen = len(cfg.args.reference)
-        with cfg.pos_count.get_lock():
-            cfg.pos_count.value = 0
+        with cfg.counter.get_lock():
+            cfg.counter.value = 0
         print(f"    0 of {(reflen+cfg.args.chunk_width-1)//cfg.args.chunk_width}"
                 f" chunks processed.", end='', flush=True)
 
@@ -464,9 +464,9 @@ def calc_pileup_scores(range_tuple):
                 del cigar_counts[0]
                 del cigar_types[0]
 
-    with cfg.pos_count.get_lock():
-        cfg.pos_count.value += 1
-        print(f"\r    {cfg.pos_count.value} of "
+    with cfg.counter.get_lock():
+        cfg.counter.value += 1
+        print(f"\r    {cfg.counter.value} of "
             f"{(len(cfg.args.reference)+cfg.args.chunk_width-1)//cfg.args.chunk_width}"
             f" chunks processed.", end='', flush=True)
 
@@ -490,8 +490,8 @@ def get_max_inss():
     else:
         print("> calculating max insertions")
         reflen = len(cfg.args.reference)
-        with cfg.pos_count.get_lock():
-            cfg.pos_count.value = 0
+        with cfg.counter.get_lock():
+            cfg.counter.value = 0
         print(f"    0 of {(reflen+cfg.args.chunk_width-1)//cfg.args.chunk_width}"
                 f" chunks processed.", end='', flush=True)
 
@@ -745,9 +745,9 @@ def calc_confusion_matrices(range_tuple):
                 del cigar_counts[0]
                 del cigar_types[0]
 
-    with cfg.pos_count.get_lock():
-        cfg.pos_count.value += 1
-        print(f"\r{cfg.pos_count.value} of "
+    with cfg.counter.get_lock():
+        cfg.counter.value += 1
+        print(f"\r{cfg.counter.value} of "
             f"{(cfg.args.contig_end-cfg.args.contig_beg+cfg.args.chunk_width-1)//cfg.args.chunk_width} chunks processed"
             f" ({cfg.args.contig}:{cfg.args.contig_beg}-{cfg.args.contig_end}).", end='', flush=True)
 
@@ -820,9 +820,9 @@ def calc_max_inss(range_tuple):
             del cigar_counts[0]
             del cigar_types[0]
 
-    with cfg.pos_count.get_lock():
-        cfg.pos_count.value += 1
-        print(f"\r    {cfg.pos_count.value} of "
+    with cfg.counter.get_lock():
+        cfg.counter.value += 1
+        print(f"\r    {cfg.counter.value} of "
             f"{(len(cfg.args.reference)+cfg.args.chunk_width-1)//cfg.args.chunk_width}"
             f" chunks processed.", end='', flush=True)
 
