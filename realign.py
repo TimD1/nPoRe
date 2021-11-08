@@ -27,7 +27,6 @@ def argparser():
     parser.add_argument("--contig_beg", type=int, default=1)
     parser.add_argument("--contig_end", type=int, default=58592616)
     parser.add_argument("--max_reads", type=int, default=0)
-    parser.add_argument("--consensus_itrs", type=int, default=1)
 
     # algorithm parameters
     parser.add_argument("--max_np", type=int, default=10)
@@ -40,7 +39,6 @@ def argparser():
     # boolean options
     parser.add_argument("--plot", action="store_true")
     parser.add_argument("--recalc_cms", action="store_true")
-    parser.add_argument("--recalc_pileups", action="store_true")
     parser.add_argument("--indel_cigar", action="store_true")
 
 
@@ -86,24 +84,6 @@ def main():
         start = perf_counter()
         read_data = pool.map(standardize_cigar, read_data)
         print(f'\n    runtime: {perf_counter()-start:.2f}s')
-
-    
-    cfg.args.itr = 0
-    while cfg.args.itr < cfg.args.consensus_itrs:
-
-        print(f"> saving intermediary results to '{cfg.args.out_prefix}{cfg.args.itr}.bam'")
-        with cfg.counter.get_lock(): cfg.counter.value = 0
-        write_results(read_data, f'{cfg.args.out_prefix}{cfg.args.itr}.bam')
-
-        print(f'> computing consensus read realignments, iteration {cfg.args.itr}')
-        get_pileup_info()
-        cfg.args.itr += 1
-        with mp.Pool() as pool:
-            start = perf_counter()
-            with cfg.counter.get_lock(): cfg.counter.value = 0
-            print(f"\r    0 reads realigned.", end='', flush=True)
-            read_data = pool.map(realign_read2, read_data)
-            print(f'\n    runtime: {perf_counter()-start:.2f}s')
 
     print(f"> saving final results to '{cfg.args.out_prefix}.bam'")
     write_results(read_data, f'{cfg.args.out_prefix}.bam')
