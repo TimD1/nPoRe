@@ -94,6 +94,17 @@ def main():
 if __name__ == "__main__":
     parser = argparser()
     cfg.args = parser.parse_args()
+
+    if cfg.args.contig:
+        if not cfg.args.contig_beg:
+            cfg.args.contig_beg = 0
+        if not cfg.args.contig_end:
+            cfg.args.contig_end = len(get_fasta(cfg.args.ref, cfg.args.contig))
+    else:
+        if cfg.args.contig_beg or cfg.args.contig_end:
+            print("\nERROR: 'contig' not supplied, but start/endpoints set.")
+            exit(1)
+
     try:
         main()
     except KeyboardInterrupt:
