@@ -11,7 +11,7 @@ import cfg as cfg
 def main():
 
     print(f"> splitting vcf")
-    vcf1, vcf2 = split_vcf(cfg.args.vcf, cfg.args.out+"pre")
+    vcf1, vcf2 = split_vcf(cfg.args.vcf, cfg.args.out_prefix+"pre")
 
     print(f"> indexing vcfs")
     subprocess.run(['tabix', '-p', 'vcf', vcf1])

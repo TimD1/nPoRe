@@ -13,7 +13,7 @@ OUT="ra_hap"
 DIR="/home/timdunn/NanoporeScripts"
 BAM="$DIR/cropped.bam"
 REF="$DIR/cropped.fasta"
-OUT="$DIR/cropped_realigned.bam"
+OUT="$DIR/cropped_realigned"
 
 ~/NanoporeScripts/align $BAM $REF
 
@@ -27,4 +27,4 @@ time python3 ../realign.py \
     --stats_dir ../stats
 
 # update MD tags
-~/NanoporeScripts/align $OUT $REF
+~/NanoporeScripts/align ${OUT}.bam $REF

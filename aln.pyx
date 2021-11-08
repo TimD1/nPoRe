@@ -561,7 +561,8 @@ cpdef align(char[::1] full_ref, char[::1] seq, str cigar,
                 b_ndown_col = a_to_b_col(a_row+n, a_col, inss, dels, r)
                 if a_row+n <= inss[next_brk] and b_ndown_col > 0: # np spans breakpoint
                     if n > 0 and idx == 0 and rpt == 0 and \
-                            match(ref[ref_idx+1:ref_idx+n+1], seq[seq_idx+1:seq_idx+1+n]):
+                            match(ref[ref_idx+1:ref_idx+n+1], 
+                                    seq[seq_idx+1:seq_idx+1+n]):
                         val1 = matrix[MAT, b_row, b_col, VAL] + \
                                 np_score(n, rpts, 1, np_scores, max_np_len)
                         matrix[NPI, b_ndown_row, b_ndown_col, VAL] = val1
@@ -570,7 +571,8 @@ cpdef align(char[::1] full_ref, char[::1] seq, str cigar,
 
                     # continue insertion
                     if n > 0 and idx == 0 and \
-                            match(ref[ref_idx+1:ref_idx+n+1], seq[seq_idx:seq_idx+n]): 
+                            match(ref[ref_idx+1:ref_idx+n+1], 
+                                    seq[seq_idx+1:seq_idx+1+n]): 
                         run = <int>(matrix[NPI, b_row, b_col, RUN]) + n
                         b_runup_row = a_to_b_row(a_row+n-run, a_col, inss, dels, r) - brk
                         b_runup_col = a_to_b_col(a_row+n-run, a_col, inss, dels, r)
