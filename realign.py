@@ -23,15 +23,17 @@ def argparser():
     parser.add_argument("out_prefix")
 
     # region of interest
-    parser.add_argument("--contig", type=str, default="chr19")
-    parser.add_argument("--contig_beg", type=int, default=1)
-    parser.add_argument("--contig_end", type=int, default=58592616)
+    parser.add_argument("--contig", type=str)
+    parser.add_argument("--contig_beg", type=int)
+    parser.add_argument("--contig_end", type=int)
     parser.add_argument("--max_reads", type=int, default=0)
 
     # algorithm parameters
     parser.add_argument("--max_np", type=int, default=10)
     parser.add_argument("--max_np_len", type=int, default=100)
     parser.add_argument("--chunk_width", type=int, default=10000)
+    parser.add_argument("--apply_vcf", type=str)
+    parser.add_argument("--min_qual", type=int, default=15)
 
     # path
     parser.add_argument("--stats_dir", default="./stats")
@@ -53,7 +55,8 @@ def main():
     subs, nps, inss, dels = get_confusion_matrices()
 
     print("> calculating score matrices")
-    cfg.args.sub_scores, cfg.args.np_scores, cfg.args.ins_scores, cfg.args.del_scores = \
+    cfg.args.sub_scores, cfg.args.np_scores, \
+            cfg.args.ins_scores, cfg.args.del_scores = \
             calc_score_matrices(subs, nps, inss, dels)
 
     if cfg.args.plot:
@@ -69,8 +72,20 @@ def main():
     read_data = get_read_data(cfg.args.bam)
     print(f'\n    runtime: {perf_counter()-start:.2f}s')
 
-    with cfg.counter.get_lock(): cfg.counter.value = 0
+    if cfg.args.apply_vcf:
+
+        print(f"> parsing VCF file '{cfg.args.apply_vcf}'")
+        with cfg.counter.get_lock(): cfg.counter.value = 0
+        cfg.args.subs = get_vcf_data()
+
     with mp.Pool() as pool:
+        if cfg.args.apply_vcf:
+
+            print('> applying SUBs to reference')
+            with cfg.counter.get_lock(): cfg.counter.value = 0
+            start = perf_counter()
+            read_data = pool.map(apply_subs, read_data)
+            print(f'\n    runtime: {perf_counter()-start:.2f}s')
 
         print('> computing individual read realignments')
         with cfg.counter.get_lock(): cfg.counter.value = 0
@@ -79,13 +94,14 @@ def main():
         read_data = pool.map(realign_read, read_data)
         print(f'\n    runtime: {perf_counter()-start:.2f}s')
 
-        with cfg.counter.get_lock(): cfg.counter.value = 0
         print('> converting to standard CIGAR format')
+        with cfg.counter.get_lock(): cfg.counter.value = 0
         start = perf_counter()
         read_data = pool.map(standardize_cigar, read_data)
         print(f'\n    runtime: {perf_counter()-start:.2f}s')
 
     print(f"> saving final results to '{cfg.args.out_prefix}.bam'")
+    with cfg.counter.get_lock(): cfg.counter.value = 0
     write_results(read_data, f'{cfg.args.out_prefix}.bam')
     print("\n")
 

@@ -69,6 +69,29 @@ def get_read_data(bam_fn):
 
 
 
+def apply_subs(read_data):
+
+    read_id, ref_name, start, stop, cigar, orig_ref, seq, hap = read_data
+
+    ref = list(orig_ref)
+    if ref_name in cfg.args.subs:
+        for pos, base in cfg.args.subs[ref_name][hap]:
+            if pos < start:
+                continue
+            if pos >= stop:
+                break
+            else:
+                ref[pos-start] = base
+    ref = ''.join(ref)
+
+    with cfg.counter.get_lock():
+        cfg.counter.value += 1
+        print(f"\r    {cfg.counter.value} reads processed.", end='', flush=True)
+
+    return (read_id, ref_name, start, stop, cigar, ref, seq, hap)
+
+
+
 def realign_read(read_data):
     '''
     Re-align reads using better estimates of SNP frequencies in new alignment
