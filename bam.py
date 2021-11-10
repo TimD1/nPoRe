@@ -110,6 +110,7 @@ def write_results(read_data, outfile):
 
     print("> writing results")
     start = perf_counter()
+    with cfg.counter.get_lock(): cfg.counter.value = 0
     header = { 'HD': {
                    'VN': '1.6', 
                    'SO': 'coordinate'

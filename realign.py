@@ -23,9 +23,9 @@ def argparser():
     parser.add_argument("out_prefix")
 
     # region of interest
-    parser.add_argument("--contig", type=str, default="chr19")
-    parser.add_argument("--contig_beg", type=int, default=1)
-    parser.add_argument("--contig_end", type=int, default=58592616)
+    parser.add_argument("--contig", type=str)
+    parser.add_argument("--contig_beg", type=int)
+    parser.add_argument("--contig_end", type=int)
     parser.add_argument("--max_reads", type=int, default=0)
 
     # algorithm parameters
@@ -94,6 +94,17 @@ def main():
 if __name__ == "__main__":
     parser = argparser()
     cfg.args = parser.parse_args()
+
+    if cfg.args.contig:
+        if not cfg.args.contig_beg:
+            cfg.args.contig_beg = 0
+        if not cfg.args.contig_end:
+            cfg.args.contig_end = len(get_fasta(cfg.args.ref, cfg.args.contig))
+    else:
+        if cfg.args.contig_beg or cfg.args.contig_end:
+            print("\nERROR: 'contig' not supplied, but start/endpoints set.")
+            exit(1)
+
     try:
         main()
     except KeyboardInterrupt:

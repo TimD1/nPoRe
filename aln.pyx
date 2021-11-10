@@ -486,17 +486,27 @@ cpdef align(char[::1] full_ref, char[::1] seq, str cigar,
                     matrix[INS, b_row, b_col, RUN] = a_col - dels[brk]
                 else:
                     val1 = matrix[MAT, b_top_row, b_top_col, VAL] + indel_start
+                    matrix[INS, b_row, b_col, VAL] = val1
+                    matrix[INS, b_row, b_col, TYP] = INS
+                    matrix[INS, b_row, b_col, RUN] = 1
+
                     val2 = matrix[INS, b_top_row, b_top_col, VAL] + indel_extend
-                    if val1 < val2: # start insertion
-                        matrix[INS, b_row, b_col, VAL] = val1
-                        matrix[INS, b_row, b_col, TYP] = INS
-                        matrix[INS, b_row, b_col, RUN] = 1
-                    else: # continue insertion
+                    if val2 < val1:
                         if a_row == inss[brk] + 1:
                             run = 1
                         else:
                             run = <int>(matrix[INS, b_top_row, b_top_col, RUN]) + 1
                         matrix[INS, b_row, b_col, VAL] = val2
+                        matrix[INS, b_row, b_col, TYP] = INS
+                        matrix[INS, b_row, b_col, RUN] = run
+
+                    val3 = matrix[NPI, b_top_row, b_top_col, VAL] + indel_extend
+                    if val3 < val1 and val3 < val2:
+                        if a_row == inss[brk] + 1:
+                            run = 1
+                        else:
+                            run = <int>(matrix[NPI, b_top_row, b_top_col, RUN]) + 1
+                        matrix[INS, b_row, b_col, VAL] = val3
                         matrix[INS, b_row, b_col, TYP] = INS
                         matrix[INS, b_row, b_col, RUN] = run
 
@@ -508,17 +518,27 @@ cpdef align(char[::1] full_ref, char[::1] seq, str cigar,
                     matrix[DEL, b_row, b_col, RUN] = a_row - inss[brk]
                 else:
                     val1 = matrix[MAT, b_left_row, b_left_col, VAL] + indel_start
+                    matrix[DEL, b_row, b_col, VAL] = val1
+                    matrix[DEL, b_row, b_col, TYP] = DEL
+                    matrix[DEL, b_row, b_col, RUN] = 1
+
                     val2 = matrix[DEL, b_left_row, b_left_col, VAL] + indel_extend
-                    if val1 < val2: # start deletion
-                        matrix[DEL, b_row, b_col, VAL] = val1
-                        matrix[DEL, b_row, b_col, TYP] = DEL
-                        matrix[DEL, b_row, b_col, RUN] = 1
-                    else: # continue deletion
+                    if val2 < val1:
                         if a_col == dels[brk] + 1:
                             run = 1
                         else:
                             run = <int>(matrix[DEL, b_left_row, b_left_col, RUN]) + 1
                         matrix[DEL, b_row, b_col, VAL] = val2
+                        matrix[DEL, b_row, b_col, TYP] = DEL
+                        matrix[DEL, b_row, b_col, RUN] = run
+
+                    val3 = matrix[NPD, b_left_row, b_left_col, VAL] + indel_extend
+                    if val3 < val1 and val3 < val2:
+                        if a_col == dels[brk] + 1:
+                            run = 1
+                        else:
+                            run = <int>(matrix[NPD, b_left_row, b_left_col, RUN]) + 1
+                        matrix[DEL, b_row, b_col, VAL] = val3
                         matrix[DEL, b_row, b_col, TYP] = DEL
                         matrix[DEL, b_row, b_col, RUN] = run
 
@@ -570,7 +590,7 @@ cpdef align(char[::1] full_ref, char[::1] seq, str cigar,
                         matrix[NPI, b_ndown_row, b_ndown_col, RUN] = n
 
                     # continue insertion
-                    if n > 0 and idx == 0 and \
+                    elif n > 0 and idx == 0 and \
                             match(ref[ref_idx+1:ref_idx+n+1], 
                                     seq[seq_idx+1:seq_idx+1+n]): 
                         run = <int>(matrix[NPI, b_row, b_col, RUN]) + n
@@ -640,10 +660,6 @@ cpdef align(char[::1] full_ref, char[::1] seq, str cigar,
             if run < 1:
                 print(f"\nERROR: run 0 @ A:({a_row},{a_col}), B:({b_row},{b_col}),  type {typ}, val {val}")
                 break
-
-            # Invalid NPDs and NPIs are run 0. They should never be reached during 
-            # backtracking (due to high penalties), but leaving this here just-in-case
-            if run < 1: run = 1
 
             op = ''
             if typ == NPI or typ == INS:   # each move is an insertion

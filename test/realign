@@ -22,7 +22,6 @@ time python3 ../realign.py \
     $BAM \
     $REF \
     $OUT \
-    --recalc_pileups \
     --contig chr19 \
     --stats_dir ../stats
 
