@@ -10,6 +10,9 @@ import cfg as cfg
 
 def main():
 
+    print(f"> selecting vcf regions")
+    get_vcf_regions()
+
     print(f"> splitting vcf")
     vcf1, vcf2 = split_vcf(cfg.args.vcf, cfg.args.out_prefix+"pre")
 
