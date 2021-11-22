@@ -84,10 +84,6 @@ def apply_subs(read_data):
                 ref[pos-start] = base
     ref = ''.join(ref)
 
-    with cfg.counter.get_lock():
-        cfg.counter.value += 1
-        print(f"\r    {cfg.counter.value} reads processed.", end='', flush=True)
-
     return (read_id, ref_name, start, stop, cigar, ref, seq, hap)
 
 
@@ -98,8 +94,14 @@ def realign_read(read_data):
     algorithm, taking n-polymer indels into account.
     '''
 
-    # unpack
-    read_id, ref_name, start, stop, cigar, ref, seq, hap = read_data
+    # keep original ref (for CIGAR)
+    _, _, _, _, _, orig_ref, _, _ = read_data
+    int_orig_ref = np.zeros(len(orig_ref), dtype=np.uint8)
+    for i in range(len(orig_ref)): 
+        int_orig_ref[i] = cfg.base_dict[orig_ref[i]]
+
+    # apply subs to ref, consider that new ref (for alignment)
+    read_id, ref_name, start, stop, cigar, ref, seq, hap = apply_subs(read_data)
 
     # convert strings to np character arrays for efficiency
     int_ref = np.zeros(len(ref), dtype=np.uint8)
@@ -110,13 +112,14 @@ def realign_read(read_data):
         int_seq[i] = cfg.base_dict[seq[i]]
 
     # align
-    new_cigar = align(int_ref, int_seq, cigar, cfg.args.sub_scores, cfg.args.np_scores)
+    new_cigar = align(int_ref, int_seq, int_orig_ref, cigar, 
+            cfg.args.sub_scores, cfg.args.np_scores)
 
     with cfg.counter.get_lock():
         cfg.counter.value += 1
         print(f"\r    {cfg.counter.value} reads realigned.", end='', flush=True)
 
-    return (read_id, ref_name, start, stop, new_cigar, ref, seq, hap)
+    return (read_id, ref_name, start, stop, new_cigar, orig_ref, seq, hap)
 
 
     

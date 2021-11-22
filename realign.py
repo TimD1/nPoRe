@@ -73,19 +73,11 @@ def main():
     print(f'\n    runtime: {perf_counter()-start:.2f}s')
 
     if cfg.args.apply_vcf:
-
         print(f"> parsing VCF file '{cfg.args.apply_vcf}'")
         with cfg.counter.get_lock(): cfg.counter.value = 0
         cfg.args.subs = get_vcf_data()
 
     with mp.Pool() as pool:
-        if cfg.args.apply_vcf:
-
-            print('> applying SUBs to reference')
-            with cfg.counter.get_lock(): cfg.counter.value = 0
-            start = perf_counter()
-            read_data = pool.map(apply_subs, read_data)
-            print(f'\n    runtime: {perf_counter()-start:.2f}s')
 
         print('> computing individual read realignments')
         with cfg.counter.get_lock(): cfg.counter.value = 0

@@ -352,7 +352,7 @@ cdef int match(char[::1] A, char[::1] B):
 @cython.boundscheck(False)
 @cython.wraparound(False)
 @cython.cdivision(True)
-cpdef align(char[::1] full_ref, char[::1] seq, str cigar, 
+cpdef align(char[::1] full_ref, char[::1] seq, char[::1] full_orig_ref, str cigar, 
         float[:,::1] sub_scores, float[:,:,::1] np_scores, 
         float indel_start=5, float indel_extend=2, int max_b_rows = 20000,
         int r = 30, int verbose=0):
@@ -422,6 +422,7 @@ cpdef align(char[::1] full_ref, char[::1] seq, str cigar,
         b_rows = next_brk - brk + 1
         matrix_buf.fill(0)
         ref = full_ref[ dels[brk] : dels[next_brk]+1 ]
+        orig_ref = full_orig_ref[ dels[brk] : dels[next_brk]+1 ]
         np_info = get_np_info(ref)
 
         # initialize N-polymer matrices with invalid states
@@ -659,7 +660,7 @@ cpdef align(char[::1] full_ref, char[::1] seq, str cigar,
                 while i < run:
                     a_row -= 1
                     a_col -= 1
-                    if ref[a_col-dels[brk]] == seq[a_row]:
+                    if orig_ref[a_col-dels[brk]] == seq[a_row]:
                         op += '='
                     else:
                         op += 'X'
