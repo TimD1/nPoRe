@@ -94,16 +94,20 @@ def realign_read(read_data):
     algorithm, taking n-polymer indels into account.
     '''
 
-    # keep original ref (for CIGAR)
-    _, _, _, _, _, orig_ref, _, _ = read_data
+    if cfg.args.apply_vcf:
+        # keep original ref (for CIGAR)
+        _, _, _, _, _, orig_ref, _, _ = read_data
+
+        # apply subs to ref, consider that new ref (for alignment)
+        read_id, ref_name, start, stop, cigar, ref, seq, hap = apply_subs(read_data)
+    else:
+        read_id, ref_name, start, stop, cigar, ref, seq, hap = read_data
+        orig_ref = ref
+
+    # convert strings to np character arrays for efficiency
     int_orig_ref = np.zeros(len(orig_ref), dtype=np.uint8)
     for i in range(len(orig_ref)): 
         int_orig_ref[i] = cfg.base_dict[orig_ref[i]]
-
-    # apply subs to ref, consider that new ref (for alignment)
-    read_id, ref_name, start, stop, cigar, ref, seq, hap = apply_subs(read_data)
-
-    # convert strings to np character arrays for efficiency
     int_ref = np.zeros(len(ref), dtype=np.uint8)
     for i in range(len(ref)): 
         int_ref[i] = cfg.base_dict[ref[i]]
@@ -488,3 +492,128 @@ def calc_confusion_matrices(range_tuple):
             f" ({cfg.args.contig}:{cfg.args.contig_beg}-{cfg.args.contig_end}).", end='', flush=True)
 
     return subs, nps, inss, dels
+
+
+
+def get_pileup_support(data):
+
+    keep, flip = 0, 0
+    ctg, pos, alleles, ps, gt = data
+    bam = pysam.AlignmentFile(cfg.args.bam, 'rb')
+
+    is_sub = len(alleles[0]) == len(alleles[1])
+    is_del = len(alleles[0]) > len(alleles[1])
+    is_ins = len(alleles[0]) < len(alleles[1])
+    ct = 0
+
+    for read in bam.fetch(ctg, pos, pos+1):
+
+        # find read substring overlapping region
+        cigar_types = [ c[0] for c in read.cigartuples ]
+        cigar_counts = [ c[1] for c in read.cigartuples ]
+        read_idx, ref_idx = 0, read.reference_start
+        read_start = read.reference_start
+        cigar, count = Cigar.M, 0
+
+        # get read haplotype
+        if read.has_tag('HP'):
+            hap = read.get_tag('HP') - 1
+        else:
+            continue # ignore unphased reads
+        ct += 1
+
+        while ref_idx <= pos+1:
+
+            read_move, ref_move = None, None
+            cigar = cigar_types[0]
+            count = cigar_counts[0]
+
+            # determine whether to move on read/ref
+            if cigar == Cigar.S:    # soft-clipped
+                read_move = True
+                ref_move = False
+            elif cigar == Cigar.H:    # hard-clipped
+                read_move = False
+                ref_move = False
+            elif cigar == Cigar.X:    # substitution
+                read_move = True
+                ref_move = True
+            elif cigar == Cigar.I:    # insertion
+                read_move = True
+                ref_move = False
+            elif cigar == Cigar.D:    # deletion
+                read_move = False
+                ref_move = True
+            elif cigar == Cigar.E:    # match
+                read_move = True
+                ref_move = True
+            elif cigar == Cigar.M:    # match/sub
+                read_move = True
+                ref_move = True
+            else:
+                print(f"\nERROR: unexpected CIGAR type for {read.query_name}")
+                exit(1)
+
+            # when to break depends on variant type
+            if is_sub:
+                if ref_move and ref_idx == pos-1:
+                    break
+            if is_del:
+                if ref_move and ref_idx == pos:
+                    break
+            if is_ins:
+                if read_move and ref_idx == pos:
+                    break
+
+            # shift reference index by one base or deleted section
+            if ref_move and read_move:
+                if ref_idx + count < pos:
+                    ref_idx += count
+                    read_idx += count
+                    cigar_counts[0] = 0
+                else:
+                    ref_idx += 1
+                    read_idx += 1
+                    cigar_counts[0] -= 1
+
+            elif ref_move:
+                if ref_idx + count < pos:
+                    ref_idx += count
+                    cigar_counts[0] = 0
+                else:
+                    ref_idx += 1
+                    cigar_counts[0] -= 1
+
+            elif read_move:
+                read_idx += count
+                cigar_counts[0] = 0
+
+            # move to next CIGAR section of interest
+            if cigar_counts[0] == 0:
+                del cigar_counts[0]
+                del cigar_types[0]
+
+        # at position of interest on reference
+        if is_sub:
+            read_base = read.query_sequence[read_idx]
+            if read_base == alleles[1]:
+                if gt[0] and hap == 0 or gt[1] and hap == 1:
+                    keep += 1
+                elif gt[0] and hap == 1 or gt[1] and hap == 0:
+                    flip += 1
+        elif is_del:
+            if cigar == Cigar.D and count >= len(alleles[0])-len(alleles[1]):
+                if gt[0] and hap == 0 or gt[1] and hap == 1:
+                    keep += 1
+                elif gt[0] and hap == 1 or gt[1] and hap == 0:
+                    flip += 1
+        elif is_ins:
+            if cigar == Cigar.I and count >= len(alleles[1])-len(alleles[0]):
+                if gt[0] and hap == 0 or gt[1] and hap == 1:
+                    keep += 1
+                elif gt[0] and hap == 1 or gt[1] and hap == 0:
+                    flip += 1
+
+        # print(f"pos: {pos}, reads: {ct}, read: {read.query_sequence[read_idx-5:read_idx]} {read.query_sequence[read_idx]} {read.query_sequence[read_idx+1:read_idx+6]}, cig: {count}{cfg.cigars[cigar]}, hap: {hap}, gt: {gt}, alleles: {alleles}, keep: {keep}, flip: {flip}")
+
+    return ctg, pos, ps, keep, flip

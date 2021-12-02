@@ -14,8 +14,8 @@ def main():
     vcf1, vcf2 = split_vcf(cfg.args.vcf, cfg.args.out_prefix+"pre")
 
     print(f"> indexing vcfs")
-    subprocess.run(['tabix', '-p', 'vcf', vcf1])
-    subprocess.run(['tabix', '-p', 'vcf', vcf2])
+    subprocess.run(['tabix', '-f', '-p', 'vcf', vcf1])
+    subprocess.run(['tabix', '-f', '-p', 'vcf', vcf2])
 
     print(f"> reading reference")
     ref = get_fasta(cfg.args.ref, cfg.args.contig)
@@ -53,10 +53,10 @@ def main():
     fix_vcf(vcf1)
     fix_vcf(vcf2)
 
-    print(f"> merging vcfs")
+    print(f"> merging haploid vcfs")
     out_fn = f"{cfg.args.out_prefix}.vcf.gz"
-    merge_vcfs(vcf1, vcf2, out_fn)
-    subprocess.run(['tabix', '-p', 'vcf', out_fn])
+    merge_hap_vcfs(vcf1, vcf2, out_fn)
+    subprocess.run(['tabix', '-f', '-p', 'vcf', out_fn])
 
 
 
@@ -73,6 +73,9 @@ def argparser():
     parser.add_argument("--contig", type=str)
     parser.add_argument("--contig_beg", type=int)
     parser.add_argument("--contig_end", type=int)
+
+    # should always be false, allows checking in other functions
+    parser.add_argument("--apply_vcf", action='store_true', default=False)
 
     parser.add_argument("--stats_dir", default="./stats")
     parser.add_argument("--recalc_cms", action="store_true")
