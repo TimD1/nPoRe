@@ -393,3 +393,137 @@ def gen_vcf(read_data, vcf_out_pre = ''):
     vcf_out.close()
 
     return vcf_out_fn
+
+
+
+def fix_phasing(in_vcf, out_vcf, plot=False):
+    
+    vcf_in = pysam.VariantFile(in_vcf, 'r')
+    vcf_out = pysam.VariantFile(out_vcf, 'w', header=vcf_in.header)
+    in_data = []
+
+    flip_scores = {}
+    KEEP = 0
+    FLIP = 1
+    print("        > parsing SNPs")
+    records = sum([1 for _ in vcf_in.fetch()])
+    with cfg.counter.get_lock():
+        cfg.counter.value = 0
+
+    # determine if each phase set is correct (BAM overrides VCF)
+    for record in vcf_in.fetch():
+
+        # get genotype and phase set
+        gt, ps = None, None
+        for sample in record.samples:
+            gt = record.samples[sample]['GT']
+            if 'PS' in record.samples[sample]:
+                ps = record.samples[sample]['PS']
+            break
+
+        # note phased homozygous positions
+        if ps and ((gt[0] and not gt[1]) or (not gt[0] and gt[1])):
+            in_data.append( (record.contig, record.pos, record.alleles, ps, gt) )
+
+        with cfg.counter.get_lock():
+            cfg.counter.value += 1
+            print(f"\r            {cfg.counter.value} of {cfg.counter.value} SNPs processed.", end='', flush=True)
+
+    # for each snp, calculate keep/flip probabilities
+    print("\n        > calculating SNP pileup counts for rephasing")
+    out_data = []
+    with mp.Pool() as pool:
+        out_data = pool.map(get_pileup_support, in_data)
+
+    # find breakpoints, breaking whatshap phaseblocks into smaller chunks
+    print("        > finding breakpoints")
+    scores = [x[4] / (x[3]+x[4]+0.001) for x in out_data]
+    calls = []
+    for x in range(len(scores)-10):
+        calls.append(np.rint(sum([np.rint(scores[x+i]) for i in range(11)]) / 11))
+    calls = [calls[0]]*5 + calls + [calls[-1]]*5
+    breaks = [0] + [ abs(x-y) for x,y in zip(calls[1:], calls[:-1]) ]
+    breakpts = []
+    for out, brk in zip(out_data, breaks):
+        ctg, pos, phaseset, keep, flip = out
+        if brk:
+            breakpts.append((ctg, pos))
+    for brk in breakpts:
+        print(f"            {brk}")
+
+    print("        > plotting")
+    if plot:
+        # show original phase sets
+        ps_dict = {}
+        cur_flip = calls[0]
+        for ctg, pos, phaseset, keep, flip in out_data:
+            if phaseset not in ps_dict:
+                ps_dict[phaseset] = []
+            ps_dict[phaseset].append(flip / (keep+flip+0.001))
+        for ps in ps_dict:
+            fig, ax = plt.subplots(figsize=(10,5))
+            plt.fill_between(range(len(ps_dict[ps])), ps_dict[ps])
+            ax.set_yticks([0,1])
+            ax.set_yticklabels(['0: KEEP', '1: FLIP'])
+            plt.savefig(f"results/img/phaseblock{ps}_old.png")
+            plt.close()
+
+        # show fixed phase sets
+        ps_dict = {}
+        cur_flip = calls[0]
+        for ctg, pos, phaseset, keep, flip in out_data:
+            cur_flip = (cur_flip + ((ctg, pos) in breakpts)) % 2
+            if phaseset not in ps_dict:
+                ps_dict[phaseset] = []
+            if cur_flip:
+                ps_dict[phaseset].append(keep / (keep+flip+0.001))
+            else:
+                ps_dict[phaseset].append(flip / (keep+flip+0.001))
+        for ps in ps_dict:
+            fig, ax = plt.subplots(figsize=(10,5))
+            plt.fill_between(range(len(ps_dict[ps])), ps_dict[ps])
+            ax.set_yticks([0,1])
+            ax.set_yticklabels(['0: KEEP', '1: FLIP'])
+            plt.savefig(f"results/img/phaseblock{ps}_new.png")
+            plt.close()
+
+    # make new VCF file, flipping homozygous haplotype phasings if necessary
+    print("        > fixing VCF phasing using breakpoints")
+    with cfg.counter.get_lock():
+        cfg.counter.value = 0
+    cur_flip = calls[0]
+    for record in vcf_in.fetch():
+        cur_flip = (cur_flip + ((record.contig, record.pos) in breakpts)) % 2
+
+        # get genotype and phase set
+        gt, ps = None, None
+        for sample in record.samples:
+            gt = record.samples[sample]['GT']
+            if 'PS' in record.samples[sample]:
+                ps = record.samples[sample]['PS']
+            break
+
+        # check if we should flip phasing
+        if ps and cur_flip:
+            if gt[0] and not gt[1]: # 1|0
+                new_record = record.copy()
+                for sample in new_record.samples:
+                    new_record.samples[sample]['GT'] = (0,1)
+                vcf_out.write(new_record)
+            if not gt[0] and gt[1]: # 0|1
+                new_record = record.copy()
+                for sample in new_record.samples:
+                    new_record.samples[sample]['GT'] = (1,0)
+                vcf_out.write(new_record)
+
+        else: # don't touch phasing, just copy record
+            new_record = record.copy()
+            vcf_out.write(new_record)
+
+        with cfg.counter.get_lock():
+            cfg.counter.value += 1
+            print(f"\r            {cfg.counter.value} of {cfg.counter.value} SNPs processed.", end='', flush=True)
+    print(" ")
+
+    vcf_in.close()
+    vcf_out.close()
