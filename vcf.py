@@ -226,7 +226,7 @@ def split_vcf(vcf_fn, vcf_out_pre='', filter_unphased=False):
 
 
 
-def merge_vcfs(sub_vcf_fn, indel_vcf_fn, out_prefix):
+def merge_vcfs(sub_vcf_fn, indel_vcf_fn, indel_ranges, out_prefix):
 
     # create iterators for both input VCFs
     sub_vcf = pysam.VariantFile(sub_vcf_fn, 'r')
@@ -242,35 +242,40 @@ def merge_vcfs(sub_vcf_fn, indel_vcf_fn, out_prefix):
     vcf_out = pysam.VariantFile(vcf_out_fn, 'w', header=sub_vcf.header)
 
     # step through both input VCFs
+    prev_sub_pos = 0
     while sub_record or indel_record:
+
+        while sub_record and len(sub_record.alleles[0]) != len(sub_record.alleles[1]):
+            sub_record = next(sub_vcf_itr, None)
+        while indel_record and len(indel_record.alleles[0]) == len(indel_record.alleles[1]):
+            indel_record = next(indel_vcf_itr, None)
         sub_pos = float('inf') if not sub_record else sub_record.pos
         indel_pos = float('inf') if not indel_record else indel_record.pos
         pos = min(sub_pos, indel_pos)
         sub = sub_pos == pos
         indel = indel_pos == pos
 
-        # merge SUB and INDEL variants
-        if sub and indel:
+        if sub:
+            # record = sub_record.copy()
+            print(sub_record.pos, sub_record.alleles, "sub")
+            # vcf_out.write(record)
 
-            # VCFs agree, copy record
-            if sub_record.alleles == indel_record.alleles:
-                record = sub_record.copy()
-                vcf_out.write(record)
+        if indel:
+            left, right = indel_ranges[(indel_record.contig, indel_record.pos)]
 
-            else: # VCFs disagree, go with SUB
-                record = sub_record.copy()
-                vcf_out.write(record)
-
-        elif sub:
-            record = sub_record.copy()
-            vcf_out.write(record)
-
-        elif indel:
+            # ensure the INDEL can't overlap with a SUB
             record = indel_record.copy()
             vcf_out.write(record)
+            if prev_sub_pos < left and sub_pos > right:
+                print(indel_record.pos, indel_record.alleles, left, right, "indel keep")
+            else:
+                print(indel_record.pos, indel_record.alleles, left, right, "indel skip")
+                pass
 
         # continue
-        if sub: sub_record = next(sub_vcf_itr, None)
+        if sub: 
+            prev_sub_pos = sub_pos
+            sub_record = next(sub_vcf_itr, None)
         if indel: indel_record = next(indel_vcf_itr, None)
 
     return vcf_out_fn
@@ -664,3 +669,89 @@ def fix_phasing(in_vcf, out_vcf, plot=False):
 
     vcf_in.close()
     vcf_out.close()
+
+
+
+def get_indel_ranges(indel_vcf, ref_fasta, ref_contig, buff = 30):
+
+    I = 1
+    D = 2
+
+    full_ref = 'N' + get_fasta(ref_fasta, ref_contig)
+    vcf = pysam.VariantFile(indel_vcf, 'r')
+    ranges = {}
+    for record in vcf.fetch():
+
+        insertion, deletion = False, False
+        if len(record.alleles) == 3: # hetero
+            continue
+        if len(record.alleles[0]) == len(record.alleles[1]): # SUB
+            continue
+        elif len(record.alleles[0]) > len(record.alleles[1]): # DEL
+            deletion = True
+        else: # INS
+            insertion = True
+
+        if deletion:
+
+            # create cig and ref for shift testing
+            after_del = record.pos + len(record.alleles[0])
+            indel_len = len(record.alleles[0]) - len(record.alleles[1])
+            ref = full_ref[record.pos-buff:record.pos] + \
+                    record.alleles[0] + \
+                    full_ref[after_del:after_del+buff]
+            cig = '='*buff + '='*len(record.alleles[1]) + 'D'*indel_len + '='*buff
+            int_cig = cig_to_int(cig)
+            int_ref = bases_to_int(ref)
+
+            # create buffers
+            nshifts_buf = np.zeros(len(cig), dtype = np.uint8)
+            shiftlen_buf = np.zeros(len(cig), dtype = np.uint8)
+
+            # push left/right get range
+            left_cig = int_to_cig(push_indels_left(int_cig, int_ref, 
+                    nshifts_buf, shiftlen_buf, D))
+            right_cig = int_to_cig(push_indels_right(int_cig, int_ref, 
+                    nshifts_buf, shiftlen_buf, D))
+            left = left_cig.find('D') + record.pos-buff
+            right = right_cig.rfind('D') + record.pos-buff
+
+            # # debug print
+            # print(full_ref[record.pos-buff:record.pos],
+            #         record.alleles[0],
+            #         full_ref[after_del:after_del+buff])
+            # print(record.contig, record.pos, record.alleles, cig, ref, left_cig, right_cig, left, right)
+
+        if insertion:
+
+            # create cig and ref for shift testing
+            after_ins = record.pos + len(record.alleles[0])
+            indel_len = len(record.alleles[1]) - len(record.alleles[0])
+            seq = full_ref[record.pos-buff:record.pos] + \
+                    record.alleles[1] + \
+                    full_ref[after_ins:after_ins+buff]
+            cig = '='*buff + '='*len(record.alleles[0]) + 'I'*indel_len + '='*buff
+            int_cig = cig_to_int(cig)
+            int_seq = bases_to_int(seq)
+
+            # create buffers
+            nshifts_buf = np.zeros(len(cig), dtype = np.uint8)
+            shiftlen_buf = np.zeros(len(cig), dtype = np.uint8)
+
+            # push left/right get range
+            left_cig = int_to_cig(push_indels_left(int_cig, int_seq, 
+                    nshifts_buf, shiftlen_buf, I))
+            right_cig = int_to_cig(push_indels_right(int_cig, int_seq, 
+                    nshifts_buf, shiftlen_buf, I))
+            left = left_cig.find('I') + record.pos-buff
+            right = right_cig.find('I') + record.pos-buff
+
+            # # debug print
+            # print(full_ref[record.pos-buff:record.pos],
+            #         record.alleles[1],
+            #         full_ref[after_ins:after_ins+buff])
+            # print(record.contig, record.pos, record.alleles, cig, ref, left_cig, right_cig, left, right)
+
+        ranges[(record.contig, record.pos)] = (left,right)
+
+    return ranges

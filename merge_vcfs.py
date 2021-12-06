@@ -21,8 +21,12 @@ def main():
     subprocess.run(['tabix', '-f', '-p', 'vcf', indel_vcf2])
 
     print(f"> merging haploid SUB and INDEL VCFs")
-    vcf1 = merge_vcfs(sub_vcf1, indel_vcf1, cfg.args.out_prefix+"_hap1")
-    vcf2 = merge_vcfs(sub_vcf2, indel_vcf2, cfg.args.out_prefix+"_hap2")
+    indel_ranges1 = get_indel_ranges(indel_vcf1, cfg.args.ref, cfg.args.contig)
+    vcf1 = merge_vcfs(sub_vcf1, indel_vcf1, indel_ranges1, 
+            cfg.args.out_prefix+"_hap1")
+    indel_ranges2 = get_indel_ranges(indel_vcf2, cfg.args.ref, cfg.args.contig)
+    vcf2 = merge_vcfs(sub_vcf2, indel_vcf2, indel_ranges2, 
+            cfg.args.out_prefix+"_hap2")
 
     print(f"> indexing vcfs")
     subprocess.run([ "tabix", "-p", "vcf", vcf1 ])
