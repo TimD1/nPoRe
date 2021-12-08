@@ -4,6 +4,7 @@ import os, subprocess
 
 from cig import *
 from util import *
+from bam import *
 import cfg
 
 
@@ -427,7 +428,7 @@ def fix_phasing(in_vcf, out_vcf, plot=False):
 
         with cfg.counter.get_lock():
             cfg.counter.value += 1
-            print(f"\r            {cfg.counter.value} of {cfg.counter.value} SNPs processed.", end='', flush=True)
+            print(f"\r            {cfg.counter.value} of {records} SNPs processed.", end='', flush=True)
 
     # for each snp, calculate keep/flip probabilities
     print("\n        > calculating SNP pileup counts for rephasing")
@@ -522,7 +523,7 @@ def fix_phasing(in_vcf, out_vcf, plot=False):
 
         with cfg.counter.get_lock():
             cfg.counter.value += 1
-            print(f"\r            {cfg.counter.value} of {cfg.counter.value} SNPs processed.", end='', flush=True)
+            print(f"\r            {cfg.counter.value} of {records} SNPs processed.", end='', flush=True)
     print(" ")
 
     vcf_in.close()

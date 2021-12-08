@@ -96,6 +96,45 @@ def realign_read(read_data):
     return (read_id, ref_name, start, stop, new_cigar, ref, seq, hap)
 
 
+
+def simple_realign_read(read_data):
+
+    # unpack
+    read_id, ref_name, start, stop, cigar, ref, seq, hap = read_data
+
+    # convert strings to np character arrays for efficiency
+    int_ref = np.zeros(len(ref), dtype=np.uint8)
+    for i in range(len(ref)): 
+        int_ref[i] = cfg.base_dict[ref[i]]
+    int_seq = np.zeros(len(seq), dtype=np.uint8)
+    for i in range(len(seq)): 
+        int_seq[i] = cfg.base_dict[seq[i]]
+
+    # align
+    new_cigar = simple_align(int_ref, int_seq, cigar)
+
+    with cfg.counter.get_lock():
+        cfg.counter.value += 1
+        print(f"\r    {cfg.counter.value} reads realigned.", end='', flush=True)
+
+    return (read_id, ref_name, start, stop, new_cigar, ref, seq, hap)
+
+
+
+def to_truth_ref(read_data):
+    '''
+    Given the CIGAR for a sequence aligned to a draft reference, and the ground 
+    truth sequence's CIGAR when aligned to the draft reference, calculate the 
+    CIGAR of the sequence aligned to the ground truth.
+    '''
+    read_id, ref_name, start, stop, cigar, truth_cigar, ref, truth_ref, seq, hap = read_data
+    new_cigar = change_ref(cigar, truth_cigar, ref, seq, truth_ref)
+    with cfg.counter.get_lock():
+        cfg.counter.value += 1
+        print(f"\r    {cfg.counter.value} reads converted.", end='', flush=True)
+    return (read_id, ref_name, start, stop, new_cigar, truth_ref, seq, hap)
+
+
     
 def write_results(read_data, outfile):
     '''

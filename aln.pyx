@@ -352,9 +352,166 @@ cdef int match(char[::1] A, char[::1] B):
 @cython.boundscheck(False)
 @cython.wraparound(False)
 @cython.cdivision(True)
+cpdef simple_align(char[::1] full_ref, char[::1] seq, str cigar, int r = 30,
+        int max_b_rows = 100000):
+    ''' Perform simple alignment.  '''
+
+    # convert CIGAR so that each movement is row+1 or col+1, enables easy banding
+    cigar = cigar.replace('X','DI').replace('=','DI') \
+            .replace('M','DI').replace('S','').replace('H','')
+
+    # precompute offsets, breakpoints, and homopolymers
+    cdef int[::1] inss = get_inss(cigar)
+    cdef int[::1] dels = get_dels(cigar)
+    cdef int[::1] breaks = get_breaks(max_b_rows, len(seq) + len(full_ref) + 1, inss, dels)
+    cdef char[::1] ref
+
+    # define useful constants
+    cdef int a_rows = len(seq) + 1
+    cdef int a_cols = len(full_ref) + 1
+    cdef int b_cols = 2*r + 1
+    cdef int b_rows = -1
+
+    cdef int dims = 2 # dimensions in matrix
+    cdef int VAL = 0  # value (alignment score)
+    cdef int TYP = 1  # type (predecessor matrix dimension)
+
+    cdef int typs = 3
+    cdef int MAT = 0  # match/substitution
+    cdef int INS = 1  # insertion
+    cdef int DEL = 2  # insertion
+
+    cdef str aln = ''
+    cdef str full_aln = ''
+    cdef str op, s
+    # for alignment offset purposes, M -> DI. Breaks are sometimes shifted by 1, 
+    # so that this DI doesn't cross the boundary of alignment chunks. 
+    # As a result, we must increase the matrix buffer size. (hence max_b_rows+1)
+    matrix_buf = np.zeros((max_b_rows+1, b_cols, dims), dtype=np.int32)
+    cdef int[:,:,::1] matrix = matrix_buf
+    # max single-move penalty is < 10, so a path with this penalty will never 
+    # be chosen. Still kept small enough so that len(seq)*INF < INT_MAX
+    cdef int INF = 100
+
+    cdef int b_row, b_col, a_row, a_col, ref_idx, seq_idx, row, col
+    cdef int b_top_row, b_top_col, b_left_row, b_left_col, b_diag_row, b_diag_col
+    cdef int run, typ, i, brk, next_brk, brk_idx
+    cdef int mat_val, ins_val, del_val
+
+    # iterate over b matrix in chunks set by breakpoints
+    for brk_idx in range(len(breaks)-1):
+
+        brk = breaks[brk_idx]
+        next_brk = breaks[brk_idx+1]
+        b_rows = next_brk - brk + 1
+        matrix_buf.fill(0)
+        ref = full_ref[ dels[brk] : dels[next_brk]+1 ]
+
+        # calculate matrix chunk
+        for b_row in range(b_rows):
+            for b_col in range(b_cols):
+                a_row = b_to_a_row(b_row + brk, b_col, inss, dels, r)
+                a_col = b_to_a_col(b_row + brk, b_col, inss, dels, r)
+
+                # skip cells out of range of this chunk of original "A" matrix
+                if a_row < inss[brk] or a_col < dels[brk] or \
+                        a_row > inss[next_brk] or a_col > dels[next_brk]:
+                    pass
+
+                # enforce new path remains within r cells of original path
+                elif b_col == 0 or b_col == 2*r:
+                    matrix[b_row, b_col, VAL] = INF * (b_row+1)
+                    matrix[b_row, b_col, TYP] = MAT
+
+                # initialize edges
+                elif a_row == inss[brk]:
+                    matrix[b_row, b_col, VAL] = a_col-dels[brk]
+                    matrix[b_row, b_col, TYP] = DEL
+                elif a_col == dels[brk]:
+                    matrix[b_row, b_col, VAL] = a_row-inss[brk]
+                    matrix[b_row, b_col, TYP] = INS
+
+                # UPDATE MATRIX
+                elif a_row > inss[brk] and a_col > dels[brk]: # can move diag
+
+                    b_top_row = a_to_b_row(a_row-1, a_col, inss, dels, r) - brk
+                    b_top_col = a_to_b_col(a_row-1, a_col, inss, dels, r)
+                    b_left_row = a_to_b_row(a_row, a_col-1, inss, dels, r) - brk
+                    b_left_col = a_to_b_col(a_row, a_col-1, inss, dels, r)
+                    b_diag_row = a_to_b_row(a_row-1, a_col-1, inss, dels, r) - brk
+                    b_diag_col = a_to_b_col(a_row-1, a_col-1, inss, dels, r)
+                    ref_idx = a_col - dels[brk] - 1
+                    seq_idx = a_row - 1
+
+                    mat_val = matrix[b_diag_row, b_diag_col, VAL] + \
+                            int(seq[seq_idx] != ref[ref_idx])
+                    ins_val = matrix[b_top_row, b_top_col, VAL] + 1
+                    del_val = matrix[b_left_row, b_left_col, VAL] + 1
+
+                    if mat_val <= ins_val and mat_val <= del_val:
+                        matrix[b_row, b_col, VAL] = mat_val
+                        matrix[b_row, b_col, TYP] = MAT
+                    elif ins_val <= mat_val and ins_val <= del_val:
+                        matrix[b_row, b_col, VAL] = ins_val
+                        matrix[b_row, b_col, TYP] = INS
+                    else:
+                        matrix[b_row, b_col, VAL] = del_val
+                        matrix[b_row, b_col, TYP] = DEL
+
+        # initialize backtracking from last cell
+        a_row = inss[next_brk]
+        a_col = dels[next_brk]
+        aln = ''
+        b_row = a_to_b_row(a_row, a_col, inss, dels, r) - brk
+        b_col = a_to_b_col(a_row, a_col, inss, dels, r)
+        path = []
+
+        # backtrack
+        while a_row > inss[brk] or a_col > dels[brk]:
+            b_row = a_to_b_row(a_row, a_col, inss, dels, r) - brk
+            b_col = a_to_b_col(a_row, a_col, inss, dels, r)
+            val = matrix[b_row, b_col, VAL]
+            typ = matrix[b_row, b_col, TYP]
+
+            path.append((a_row, a_col))
+            if a_row < 0:
+                print(f"ERROR: row < 0 @ A:({a_row},{a_col}), B:({b_row},{b_col})")
+                break
+            if a_col < 0:
+                print(f"ERROR: col < 0 @ A:({a_row},{a_col}), B:({b_row},{b_col})")
+                break
+
+            op = ''
+            if typ == INS:
+                op += 'I'
+                a_row -= 1
+            elif typ == DEL:
+                op += 'D'
+                a_col -= 1
+            elif typ == MAT:
+                a_row -= 1
+                a_col -= 1
+                if ref[a_col-dels[brk]] == seq[a_row]:
+                    op += '='
+                else:
+                    op += 'X'
+            else:
+                print("ERROR: unknown alignment matrix type:", typ)
+                break
+            aln += op
+
+        full_aln += aln[::-1]
+
+    return full_aln
+
+
+
+@cython.boundscheck(False)
+@cython.wraparound(False)
+@cython.cdivision(True)
 cpdef align(char[::1] full_ref, char[::1] seq, str cigar, 
         float[:,::1] sub_scores, float[:,:,::1] np_scores, 
-        float indel_start=5, float indel_extend=2, int max_b_rows = 20000,
+        float indel_start=5, float indel_extend=2, int max_b_rows = 15000,
         int r = 30, int verbose=0):
     ''' Perform alignment.  '''
 
