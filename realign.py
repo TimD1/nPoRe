@@ -2,6 +2,8 @@ import argparse, os, subprocess
 import numpy as np
 from collections import defaultdict
 from time import perf_counter
+import multiprocessing as mp
+from ctypes import c_wchar_p
 
 import pysam
 
@@ -31,7 +33,8 @@ def argparser():
     # algorithm parameters
     parser.add_argument("--max_np", type=int, default=10)
     parser.add_argument("--max_np_len", type=int, default=100)
-    parser.add_argument("--chunk_width", type=int, default=10000)
+    parser.add_argument("--chunk_width", type=int, default=1000000)
+    parser.add_argument("--reads_per_bam", type=int, default=100000)
 
     # path
     parser.add_argument("--stats_dir", default="./stats")
@@ -39,6 +42,7 @@ def argparser():
     # boolean options
     parser.add_argument("--plot", action="store_true")
     parser.add_argument("--recalc_cms", action="store_true")
+    parser.add_argument("--recalc_exit", action="store_true")
     parser.add_argument("--indel_cigar", action="store_true")
 
 
@@ -49,11 +53,9 @@ def argparser():
 def main():
 
     print("> selecting BAM regions")
-    start = perf_counter()
     get_bam_regions()
-    print(f'\n    runtime: {perf_counter()-start:.2f}s')
 
-    print("> loading confusion matrices")
+    # loading confusion matrices
     os.makedirs(cfg.args.stats_dir, exist_ok=True)
     subs, nps, inss, dels = get_confusion_matrices()
 
@@ -69,30 +71,33 @@ def main():
         plot_np_score_matrices(cfg.args.np_scores)
         exit(0)
 
+    print('> creating output SAM')
+    create_header(f'{cfg.args.out_prefix}.sam')
+
     print('> extracting read data from BAM')
-    start = perf_counter()
     read_data = get_read_data(cfg.args.bam)
-    print(f'\n    runtime: {perf_counter()-start:.2f}s')
 
-    with cfg.counter.get_lock(): cfg.counter.value = 0
+    start = perf_counter()
     with mp.Pool() as pool:
-
         print('> computing individual read realignments')
         with cfg.counter.get_lock(): cfg.counter.value = 0
-        start = perf_counter()
-        print(f"\r    0 reads realigned.", end='', flush=True)
-        read_data = pool.map(realign_read, read_data)
-        print(f'\n    runtime: {perf_counter()-start:.2f}s')
+        print(f"\r    0 reads processed.", end='', flush=True)
+        read_data = pool.imap_unordered(realign_read, read_data, chunksize=100)
+        pool.close()
+        pool.join()
+    print(f'\n    runtime: {perf_counter()-start:.2f}s')
 
-        with cfg.counter.get_lock(): cfg.counter.value = 0
-        print('> converting to standard CIGAR format')
-        start = perf_counter()
-        read_data = pool.map(standardize_cigar, read_data)
-        print(f'\n    runtime: {perf_counter()-start:.2f}s')
-
-    print(f"> saving final results to '{cfg.args.out_prefix}.bam'")
-    write_results(read_data, f'{cfg.args.out_prefix}.bam')
-    print("\n")
+    print('> converting to indexed BAM')
+    subprocess.run(["samtools", "view", "-b", 
+        "-o", f'{cfg.args.out_prefix}.bam', f'{cfg.args.out_prefix}.sam'])
+    subprocess.run(["samtools", "sort", "-@", f'{os.cpu_count()}', 
+        "-o", f'{cfg.args.out_prefix}_sorted.bam', f'{cfg.args.out_prefix}.bam'])
+    subprocess.run(["samtools", "calmd", "-b", 
+        f'{cfg.args.out_prefix}_sorted.bam', cfg.args.ref], 
+        stdout=open(f'{cfg.args.out_prefix}.bam', 'w'), stderr=subprocess.DEVNULL)
+    subprocess.run(["rm", f'{cfg.args.out_prefix}_sorted.bam'])
+    subprocess.run(["samtools", "index" , "-@", f'{os.cpu_count()}', 
+        f'{cfg.args.out_prefix}.bam'])
 
 
 

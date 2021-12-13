@@ -8,6 +8,10 @@ def get_fasta(reference, contig):
     return str(SeqIO.to_dict(SeqIO.parse(reference, "fasta"))[contig].seq[:])
 
 
+def count_chunks(regions):
+    return sum([(end-start+cfg.args.chunk_width-1)//cfg.args.chunk_width 
+        for ctg,start,end in cfg.args.regions])
+
 
 def get_bam_regions():
 
@@ -15,12 +19,12 @@ def get_bam_regions():
     try:
         ref = pysam.FastaFile(cfg.args.ref)
     except (AttributeError, IOError, ValueError):
-        print("\nERROR: could not open FASTA '{cfg.args.ref}'.")
+        print(f"\nERROR: could not open FASTA '{cfg.args.ref}'.")
         exit(1)
     try:
         bam = pysam.AlignmentFile(cfg.args.bam)
     except (AttributeError, IOError, ValueError):
-        print("\nERROR: could not open BAM '{cfg.args.bam}'.")
+        print(f"\nERROR: could not open BAM '{cfg.args.bam}'.")
         exit(1)
 
     # just align selected region
@@ -31,7 +35,7 @@ def get_bam_regions():
             cfg.args.contig_end = \
                     ref.get_reference_length(cfg.args.contig)-1
         cfg.args.regions = [(cfg.args.contig, 
-                cfg.args.contig_beg-1, cfg.args.contig_end-1)]
+                cfg.args.contig_beg, cfg.args.contig_end)]
 
     # add all contigs
     else:
@@ -61,12 +65,12 @@ def get_vcf_regions():
     try:
         ref = pysam.FastaFile(cfg.args.ref)
     except (AttributeError, IOError, ValueError):
-        print("\nERROR: could not open FASTA '{cfg.args.ref}'.")
+        print(f"\nERROR: could not open FASTA '{cfg.args.ref}'.")
         exit(1)
     try:
-        bcf = pysam.VariantFile(cfg.args.vcf)
+        vcf = pysam.VariantFile(cfg.args.vcf)
     except (AttributeError, IOError, ValueError):
-        print("\nERROR: could not open VCF '{cfg.args.vcf}'.")
+        print(f"\nERROR: could not open VCF '{cfg.args.vcf}'.")
         exit(1)
 
     # just use selected region
@@ -77,7 +81,7 @@ def get_vcf_regions():
             cfg.args.contig_end = \
                     ref.get_reference_length(cfg.args.contig)-1
         cfg.args.regions = [(cfg.args.contig, 
-                cfg.args.contig_beg-1, cfg.args.contig_end-1)]
+                cfg.args.contig_beg, cfg.args.contig_end)]
 
     # use all contigs
     else:
@@ -97,6 +101,6 @@ def get_vcf_regions():
             else:
                 l = ref.get_reference_length(ctg)
 
-                 # check this contig has mutations
-                 if sum(1 for _ in vcf.fetch(ctg, 0, l-1):
+                # check this contig has mutations
+                if sum(1 for _ in vcf.fetch(ctg, 0, l-1)):
                     cfg.args.regions.append((ctg, 0, l-1))

@@ -99,7 +99,7 @@ def extend_pysam_cigar(ops, counts):
 
 @cython.boundscheck(False)
 @cython.wraparound(False)
-cdef push_indels_left(char[::1] cigar, char[::1] seq, char[::1] nshifts_buf, 
+cpdef push_indels_left(char[::1] cigar, char[::1] seq, char[::1] nshifts_buf, 
         char[::1] shiftlen_buf, char push_op):
     ''' Push CIGAR indels leftwards. '''
     cdef char M = 0
@@ -161,7 +161,7 @@ cdef push_indels_left(char[::1] cigar, char[::1] seq, char[::1] nshifts_buf,
 
 @cython.boundscheck(False)
 @cython.wraparound(False)
-cdef push_inss_thru_dels(char[::1] cigar):
+cpdef push_inss_thru_dels(char[::1] cigar):
     ''' Enable CIGAR insertions to be pushed leftward through deletions. '''
     cdef char I = 1
     cdef char D = 2
@@ -228,7 +228,7 @@ def int_to_cig(int_cig):
 
 @cython.boundscheck(False)
 @cython.wraparound(False)
-cdef same_cigar(char[::1] cig1, char[::1] cig2):
+cpdef same_cigar(char[::1] cig1, char[::1] cig2):
     cdef int cig1_len = len(cig1)
     cdef int cig2_len = len(cig2)
     cdef int i
@@ -240,45 +240,3 @@ cdef same_cigar(char[::1] cig1, char[::1] cig2):
             if cig1[i] != cig2[i]:
                 return False
         return True
-
-
-cpdef standardize_cigar(read_data):
-    ''' Try to force all INDELs into beginning of repetitive region. '''
-    cdef char I = 1
-    cdef char D = 2
-
-    read_id, ref_name, start, stop, cigar, ref, seq, hap = read_data
-
-    # can optionally only report INDELs, assume substitutions found already
-    if cfg.args.indel_cigar:
-        cigar = cigar.replace('X', 'DI').replace('=','M')
-    else: 
-        cigar = cigar.replace('X', 'M').replace('=','M')
-
-    cig_len = len(cigar)
-    nshifts_buf_arr = np.zeros(cig_len, dtype = np.uint8)
-    cdef char[::1] nshifts_buf = nshifts_buf_arr
-    shiftlen_buf_arr = np.zeros(cig_len, dtype = np.uint8)
-    cdef char[::1] shiftlen_buf = shiftlen_buf_arr
-    cdef char[::1] int_cig = cig_to_int(cigar)
-    cdef char[::1] int_ref = bases_to_int(ref)
-    cdef char[::1] int_seq = bases_to_int(seq)
-
-    while True:
-        old_cig = int_cig[:]
-
-        # push left, through
-        int_cig = push_indels_left(int_cig, int_ref, nshifts_buf, shiftlen_buf, D)
-        int_cig = push_inss_thru_dels(int_cig)
-        int_cig = push_indels_left(int_cig, int_seq, nshifts_buf, shiftlen_buf, I)
-        int_cig = push_inss_thru_dels(int_cig)
-
-        if same_cigar(old_cig, int_cig): break
-
-    new_cigar = int_to_cig(int_cig).replace('ID','M')
-
-    with cfg.counter.get_lock():
-        cfg.counter.value += 1
-        print(f"\r    {cfg.counter.value} CIGARs standardized.", end='', flush=True)
-
-    return (read_id, ref_name, start, stop, new_cigar, ref, seq, hap)

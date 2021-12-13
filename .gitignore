@@ -1,5 +1,6 @@
 __pycache__
 stats/
+guppy5_stats/
 *.bam*
 *.sam
 *.txt

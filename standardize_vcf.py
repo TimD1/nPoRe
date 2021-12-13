@@ -13,53 +13,34 @@ def main():
     print(f"> selecting vcf regions")
     get_vcf_regions()
 
-    print(f"> splitting vcf")
-    vcf1, vcf2 = split_vcf(cfg.args.vcf, cfg.args.out_prefix+"pre")
-
-    print(f"> indexing vcfs")
-    subprocess.run(['tabix', '-p', 'vcf', vcf1])
-    subprocess.run(['tabix', '-p', 'vcf', vcf2])
-
-    print(f"> reading reference")
-    ref = get_fasta(cfg.args.ref, cfg.args.contig)
-
-    print(f"> converting vcfs and ref to sequences")
-    seq1, cig1 = apply_vcf(vcf1, ref)
-    seq2, cig2 = apply_vcf(vcf2, ref)
-
-    # package data
-    cigar1_data = ("1", "chr19", 0, 0, cig1, ref, seq1, 1)
-    cigar2_data = ("2", "chr19", 0, 0, cig2, ref, seq2, 2)
-
     print("> calculating score matrices")
     subs, nps, inss, dels = get_confusion_matrices()
     cfg.args.sub_scores, cfg.args.np_scores, \
             cfg.args.ins_scores, cfg.args.del_scores = \
             calc_score_matrices(subs, nps, inss, dels)
 
-    print(f"> realigning hap sequences")
-    with mp.Pool() as pool:
-        data = pool.map(realign_read, [cigar1_data, cigar2_data])
+    print(f"> splitting vcf")
+    vcf1, vcf2 = split_vcf(cfg.args.vcf, cfg.args.out_prefix+"pre")
 
-    print(f"\n> standardizing hap cigars")
+    print(f"> converting vcfs and ref to sequences")
+    hap1_data = apply_vcf(vcf1, 1)
+    hap2_data = apply_vcf(vcf2, 2)
+
+    print(f"> realigning hap sequences")
     with cfg.counter.get_lock(): cfg.counter.value = 0
     with mp.Pool() as pool:
-        data = pool.map(standardize_cigar, data)
-    cigar1_data = data[0]
-    cigar2_data = data[1]
+        data = pool.map(realign_hap, hap1_data + hap2_data)
+    hap1_data = [ x for x in data if x[1] == 1 ]
+    hap2_data = [ x for x in data if x[1] == 2 ]
 
     print('\n> generating standardized vcfs')
-    vcf1 = gen_vcf(cigar1_data, cfg.args.out_prefix)
-    vcf2 = gen_vcf(cigar2_data, cfg.args.out_prefix)
-
-    print(f"> indexing vcfs")
-    fix_vcf(vcf1)
-    fix_vcf(vcf2)
+    vcf1 = gen_vcf(hap1_data, 1, cfg.args.out_prefix)
+    vcf2 = gen_vcf(hap2_data, 2, cfg.args.out_prefix)
 
     print(f"> merging vcfs")
     out_fn = f"{cfg.args.out_prefix}.vcf.gz"
     merge_vcfs(vcf1, vcf2, out_fn)
-    subprocess.run(['tabix', '-p', 'vcf', out_fn])
+    subprocess.run(['tabix', '-f', '-p', 'vcf', out_fn])
 
 
 

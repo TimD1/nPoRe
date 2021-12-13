@@ -1,5 +1,5 @@
 import multiprocessing as mp
-import os, re, itertools, sys
+import os, re, itertools, sys, gc, psutil
 from bisect import bisect_left, bisect_right
 from time import perf_counter
 
@@ -16,56 +16,33 @@ from util import *
 
 def get_read_data(bam_fn):
 
-    # count reads
-    try:
+    try: # verify bam exists
         bam = pysam.AlignmentFile(bam_fn, 'rb')
     except FileNotFoundError:
         print(f"\nERROR: BAM file '{bam_fn}' not found.")
         exit(1)
 
-    reads = None
-    if cfg.args.contig:
-        reads = bam.fetch(
-                    cfg.args.contig, 
-                    cfg.args.contig_beg, 
-                    cfg.args.contig_end)
-    else:
-        reads = bam.fetch()
-    nreads = sum(1 for _ in reads)
-
-    # get all reads in region of interest
-    if cfg.args.contig:
-        reads = bam.fetch(
-                    cfg.args.contig, 
-                    cfg.args.contig_beg, 
-                    cfg.args.contig_end)
-    else:
-        reads = bam.fetch()
-
-    # convert BAM to workable mp format: [(id, ctg, pos, cigar, ref, seq)...]
-    read_data = []
-    rds = 0
     kept = 0
-    print(f'\r    0 of {nreads} reads processed.', end='', flush=True)
-    for read in reads:
-        if not read.is_secondary and not read.is_supplementary and not read.is_unmapped:
-            read_data.append((
-                read.query_name,
-                read.reference_name,
-                read.reference_start,
-                read.reference_start + read.reference_length,
-                expand_cigar(read.cigarstring).replace('S','').replace('H',''),
-                read.get_reference_sequence().upper(),
-                read.query_alignment_sequence.upper(),
-                0 if not read.has_tag('HP') else int(read.get_tag('HP'))
-            ))
-            kept += 1
-        rds += 1
-        print(f'\r    {rds} of {nreads} reads processed, {kept} primary reads kept.', end='', flush=True)
-        if cfg.args.max_reads and kept >= cfg.args.max_reads:
-            break
-
-    return read_data
+    for ctg, start, stop in cfg.args.regions:
+        for read in bam.fetch(ctg, start, stop):
+            if cfg.args.max_reads and kept >= cfg.args.max_reads:
+                return
+            if not read.is_secondary and not read.is_supplementary \
+                    and not read.is_unmapped:
+                kept += 1
+                yield (
+                    read.query_name,
+                    read.flag,
+                    read.reference_name,
+                    read.reference_start,
+                    read.mapping_quality,
+                    read.cigarstring,
+                    read.reference_start + read.reference_length,
+                    read.query_alignment_sequence.upper(),
+                    ''.join([chr(33+x) for x in read.query_alignment_qualities]),
+                    read.get_reference_sequence().upper(),
+                    0 if not read.has_tag('HP') else int(read.get_tag('HP'))
+                )
 
 
 
@@ -74,43 +51,88 @@ def realign_read(read_data):
     Re-align reads using better estimates of SNP frequencies in new alignment
     algorithm, taking n-polymer indels into account.
     '''
+    ### ALIGN ###
+    read_id, flag, ref_name, start, mapq, cigar, stop, seq, quals, ref, hap = \
+            read_data
+    cigar = expand_cigar(cigar).replace('S','').replace('H','')
+    int_ref = bases_to_int(ref)
+    int_seq = bases_to_int(seq)
+    cigar = align(int_ref, int_seq, cigar, cfg.args.sub_scores, cfg.args.np_scores)
 
-    # unpack
-    read_id, ref_name, start, stop, cigar, ref, seq, hap = read_data
+    ### STANDARDIZE ###
+    if cfg.args.indel_cigar:
+        cigar = cigar.replace('X', 'DI').replace('=','M')
+    else: 
+        cigar = cigar.replace('X', 'M').replace('=','M')
+    cig_len = len(cigar)
+    nshifts_buf = np.zeros(cig_len, dtype = np.uint8)
+    shiftlen_buf = np.zeros(cig_len, dtype = np.uint8)
+    int_cig = cig_to_int(cigar)
+    while True:
+        old_cig = int_cig[:]
+        I, D = 1, 2
+        int_cig = push_indels_left(int_cig, int_ref, nshifts_buf, shiftlen_buf, D)
+        int_cig = push_inss_thru_dels(int_cig)
+        int_cig = push_indels_left(int_cig, int_seq, nshifts_buf, shiftlen_buf, I)
+        int_cig = push_inss_thru_dels(int_cig)
+        if same_cigar(old_cig, int_cig): break
+    cigar = int_to_cig(int_cig).replace('ID','M')
 
-    # convert strings to np character arrays for efficiency
-    int_ref = np.zeros(len(ref), dtype=np.uint8)
-    for i in range(len(ref)): 
-        int_ref[i] = cfg.base_dict[ref[i]]
-    int_seq = np.zeros(len(seq), dtype=np.uint8)
-    for i in range(len(seq)): 
-        int_seq[i] = cfg.base_dict[seq[i]]
+    ### WRITE ###
+    with cfg.counter.get_lock():
+        cfg.counter.value += 1
+        print(f"\r    {cfg.counter.value} reads processed.", end='', flush=True)
 
-    # align
-    new_cigar = align(int_ref, int_seq, cigar, cfg.args.sub_scores, cfg.args.np_scores)
+        out_bam_fh = open(f'{cfg.args.out_prefix}.sam', 'a')
+        print(f"{read_id}\t{flag}\t{ref_name}\t{start+1}\t{mapq}\t{collapse_cigar(cigar)}\t*\t0\t{stop-start}\t{seq}\t{quals}\tHP:i:{hap}", file=out_bam_fh)
+        out_bam_fh.close()
+
+    # free unused RAM
+    del cigar, seq, quals, int_ref, int_seq, int_cig, nshifts_buf, shiftlen_buf
+    if psutil.virtual_memory().percent > 90:
+        gc.collect()
+    
+
+
+def realign_hap(hap_data):
+    '''
+    Re-align reads using better estimates of SNP frequencies in new alignment
+    algorithm, taking n-polymer indels into account.
+    '''
+    ### ALIGN ###
+    contig, hap, seq, ref, cigar = hap_data
+    int_ref = bases_to_int(ref)
+    int_seq = bases_to_int(seq)
+    cigar = align(int_ref, int_seq, cigar, cfg.args.sub_scores, cfg.args.np_scores)
+
+    ### STANDARDIZE ###
+    if cfg.args.indel_cigar:
+        cigar = cigar.replace('X', 'DI').replace('=','M')
+    else: 
+        cigar = cigar.replace('X', 'M').replace('=','M')
+    cig_len = len(cigar)
+    nshifts_buf = np.zeros(cig_len, dtype = np.uint8)
+    shiftlen_buf = np.zeros(cig_len, dtype = np.uint8)
+    int_cig = cig_to_int(cigar)
+    while True:
+        old_cig = int_cig[:]
+        I, D = 1, 2
+        int_cig = push_indels_left(int_cig, int_ref, nshifts_buf, shiftlen_buf, D)
+        int_cig = push_inss_thru_dels(int_cig)
+        int_cig = push_indels_left(int_cig, int_seq, nshifts_buf, shiftlen_buf, I)
+        int_cig = push_inss_thru_dels(int_cig)
+        if same_cigar(old_cig, int_cig): break
+    cigar = int_to_cig(int_cig).replace('ID','M')
 
     with cfg.counter.get_lock():
         cfg.counter.value += 1
-        print(f"\r    {cfg.counter.value} reads realigned.", end='', flush=True)
-
-    return (read_id, ref_name, start, stop, new_cigar, ref, seq, hap)
-
+        print(f"\r    {cfg.counter.value} reads processed.", end='', flush=True)
+    return contig, hap, seq, ref, cigar
 
     
-def write_results(read_data, outfile):
-    '''
-    Write a `.bam` file for a set of alignments.
-    '''
-    print("> creating BAM index")
-    start = perf_counter()
-    bam = pysam.AlignmentFile(cfg.args.bam, 'rb')
-    bam_index = pysam.IndexedReads(bam)
-    bam_index.build()
-    print(f'    runtime: {perf_counter()-start:.2f}s')
 
-    print("> writing results")
-    start = perf_counter()
-    with cfg.counter.get_lock(): cfg.counter.value = 0
+def create_header(outfile):
+    bam = pysam.AlignmentFile(cfg.args.bam, 'rb')
     header = { 'HD': {
                    'VN': '1.6', 
                    'SO': 'coordinate'
@@ -124,54 +146,24 @@ def write_results(read_data, outfile):
                    'CL': ' '.join(sys.argv)
                }]
              }
-    with pysam.Samfile(outfile, 'wb', header=header) as fh:
-
-        for read_id, refname, read_start, read_end, cigar, ref, seq, hap in read_data:
-
-            # find corresponding read in original BAM
-            try:
-                aln_itr = bam_index.find(read_id)
-                old_alignment = next(aln_itr)
-                while   old_alignment.is_secondary or \
-                        old_alignment.is_supplementary or \
-                        old_alignment.is_unmapped:
-                    old_alignment = next(aln_itr)
-
-            except (KeyError, StopIteration) as e:
-                print(f"\nERROR: could not find primary read {read_id} in BAM file '{cfg.args.bam}'.")
-                exit(1)
-
-            # overwrite CIGAR string
-            new_alignment = pysam.AlignedSegment()
-            new_alignment.query_name      = old_alignment.query_name
-            new_alignment.query_sequence  = old_alignment.query_alignment_sequence
-            new_alignment.flag            = old_alignment.flag
-            new_alignment.reference_start = old_alignment.reference_start
-            new_alignment.mapping_quality = old_alignment.mapping_quality
-            new_alignment.query_qualities = old_alignment.query_alignment_qualities
-            new_alignment.tags            = old_alignment.tags
-            if new_alignment.has_tag('MD'):
-                new_alignment.set_tag('MD', None)
-            new_alignment.reference_id    = bam.references.index(cfg.args.contig)
-            new_alignment.cigarstring     = collapse_cigar(cigar)
-            fh.write(new_alignment)
-
-            # print progress
-            with cfg.counter.get_lock():
-                cfg.counter.value += 1
-                print(f"\r    {cfg.counter.value} of {len(read_data)} alignments written.", end='', flush=True)
-
-    pysam.index(outfile)
-    print(f'\n    runtime: {perf_counter()-start:.2f}s')
-    return
+    fh = pysam.Samfile(outfile, 'w', header=header)
+    fh.close()
 
 
 
-def get_ranges(start, stop):
+def get_ranges(regions):
     ''' Split (start, stop) into `n` even chunks. '''
-    starts = list(range(start, stop, cfg.args.chunk_width))
-    stops = [ min(stop, st + cfg.args.chunk_width) for st in starts ]
-    return list(zip(starts, stops))
+
+    contigs = []
+    starts = []
+    stops = []
+    for contig, start, stop in regions:
+        contig_starts = list(range(start, stop, cfg.args.chunk_width))
+        contig_stops = [ min(stop, st + cfg.args.chunk_width) for st in starts ]
+        starts.extend(contig_starts)
+        stops.extend(contig_stops)
+        contigs.extend([contig]*len(contig_starts))
+    return list(zip(contigs, starts, stops))
 
 
 
@@ -194,9 +186,9 @@ def get_confusion_matrices():
 
     else:
         print("> calculating confusion matrices")
-        print(f"0 of {(cfg.args.contig_end-cfg.args.contig_beg+cfg.args.chunk_width-1)//cfg.args.chunk_width} chunks processed"
-            f" ({cfg.args.contig}:{cfg.args.contig_beg}-{cfg.args.contig_end}).", end='', flush=True)
-        ranges = get_ranges(cfg.args.contig_beg, cfg.args.contig_end)
+        num_chunks = count_chunks(cfg.args.regions)
+        print(f"0 of {num_chunks} chunks processed", end='', flush=True)
+        ranges = get_ranges(cfg.args.regions)
         with mp.Pool() as pool: # multi-threaded
             results = list(pool.map(calc_confusion_matrices, ranges))
         print(" ")
@@ -213,6 +205,9 @@ def get_confusion_matrices():
         np.save(f'{cfg.args.stats_dir}/nps_cm', nps)
         np.save(f'{cfg.args.stats_dir}/inss_cm', inss)
         np.save(f'{cfg.args.stats_dir}/dels_cm', dels)
+
+        if cfg.args.recalc_exit:
+            exit(1)
 
         return subs, nps, inss, dels
 
@@ -328,14 +323,16 @@ def calc_confusion_matrices(range_tuple):
         exit(1)
 
     # iterate over all reference positions
-    window_start, window_end = range_tuple
-    for read in bam.fetch(cfg.args.contig, window_start, window_end):
+    num_chunks = count_chunks(cfg.args.regions)
+    contig, window_start, window_end = range_tuple
+    for read in bam.fetch(contig, window_start, window_end):
 
         # get reference, precalculate n-polymer stats
         try:
             # ref = reference[read_start:window_end]
             ref = read.get_reference_sequence().upper() \
-                    [max(0, window_start-read.reference_start) : window_end-read.reference_start]
+                    [max(0, window_start-read.reference_start) : 
+                            window_end-read.reference_start]
         except TypeError: 
             # throwing error due to NoneType, checking for None fails...
             continue
@@ -458,8 +455,7 @@ def calc_confusion_matrices(range_tuple):
 
     with cfg.counter.get_lock():
         cfg.counter.value += 1
-        print(f"\r{cfg.counter.value} of "
-            f"{(cfg.args.contig_end-cfg.args.contig_beg+cfg.args.chunk_width-1)//cfg.args.chunk_width} chunks processed"
-            f" ({cfg.args.contig}:{cfg.args.contig_beg}-{cfg.args.contig_end}).", end='', flush=True)
+        print(f"\r{cfg.counter.value} of {num_chunks} chunks processed.", 
+                end='', flush=True)
 
     return subs, nps, inss, dels
