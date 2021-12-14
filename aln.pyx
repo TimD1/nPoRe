@@ -87,7 +87,7 @@ def fix_matrix_properties(scores, delta = 0.01):
 
 
 
-def calc_score_matrices(subs, nps, inss, dels):
+def calc_score_matrices(subs, nps, inss, dels, delta=0.01):
 
     # calculate homopolymer scores matrix
     np_scores = np.zeros_like(nps, dtype=np.float32)
@@ -96,8 +96,7 @@ def calc_score_matrices(subs, nps, inss, dels):
             total = np.sum(nps[n, ref_len])
             for call_len in range(cfg.args.max_np_len):
                 count = int(nps[n, ref_len, call_len])
-                bias = 10
-                frac = (count + 0.01 + int(ref_len==call_len)*bias) / (total + 0.01*cfg.args.max_np_len + bias)
+                frac = (count + delta) / (total + delta*cfg.args.max_np_len)
                 np_scores[n, ref_len, call_len] = -np.log(frac)
     np_scores = fix_matrix_properties(np_scores)
 
@@ -106,20 +105,20 @@ def calc_score_matrices(subs, nps, inss, dels):
     for i in range(1, cfg.nbases):
         for j in range(1, cfg.nbases):
             if i != j:
-                sub_scores[i, j] = -np.log( (subs[i,j]+0.01) / (np.sum(subs[i])+0.1) )
+                sub_scores[i, j] = -np.log( (subs[i,j]+delta) / (np.sum(subs[i])+delta*cfg.nbases) )
             else:
                 sub_scores[i, j] = 0
 
     ins_scores = np.zeros_like(inss, dtype=np.float32)
     total = np.sum(inss)
     for l in range(cfg.args.max_np_len):
-        frac = (inss[l] + 0.01) / (total + 0.01*cfg.args.max_np_len)
+        frac = (inss[l] + delta) / (total + delta*cfg.args.max_np_len)
         ins_scores[l] = -np.log(frac)
 
     del_scores = np.zeros_like(dels, dtype=np.float32)
     total = np.sum(dels)
     for l in range(cfg.args.max_np_len):
-        frac = (dels[l] + 0.01) / (total + 0.01*cfg.args.max_np_len)
+        frac = (dels[l] + delta) / (total + delta*cfg.args.max_np_len)
         del_scores[l] = -np.log(frac)
 
     return sub_scores, np_scores, ins_scores, del_scores
