@@ -29,6 +29,9 @@ def get_bam_regions():
 
     # just align selected region
     if cfg.args.contig:
+        if cfg.args.contigs:
+            print("\nERROR: can't set 'contig' and 'contigs'.")
+            exit(1)
         if not cfg.args.contig_beg:
             cfg.args.contig_beg = 0
         if not cfg.args.contig_end:
@@ -36,6 +39,16 @@ def get_bam_regions():
                     ref.get_reference_length(cfg.args.contig)-1
         cfg.args.regions = [(cfg.args.contig, 
                 cfg.args.contig_beg, cfg.args.contig_end)]
+
+    # add several contigs
+    elif cfg.args.contigs:
+        if cfg.args.contig_beg or cfg.args.contig_end:
+            print("\nERROR: can't set start/endpoints with multiple contigs.")
+            exit(1)
+        cfg.args.regions = []
+        for contig in cfg.args.contigs.split(','):
+            end = ref.get_reference_length(contig)-1
+            cfg.args.regions.append((contig, 0, end))
 
     # add all contigs
     else:
@@ -75,6 +88,9 @@ def get_vcf_regions():
 
     # just use selected region
     if cfg.args.contig:
+        if cfg.args.contigs:
+            print("\nERROR: can't set 'contig' and 'contigs'.")
+            exit(1)
         if not cfg.args.contig_beg:
             cfg.args.contig_beg = 0
         if not cfg.args.contig_end:
@@ -82,6 +98,16 @@ def get_vcf_regions():
                     ref.get_reference_length(cfg.args.contig)-1
         cfg.args.regions = [(cfg.args.contig, 
                 cfg.args.contig_beg, cfg.args.contig_end)]
+
+    # add several contigs
+    elif cfg.args.contigs:
+        if cfg.args.contig_beg or cfg.args.contig_end:
+            print("\nERROR: can't set start/endpoints with multiple contigs.")
+            exit(1)
+        cfg.args.regions = []
+        for contig in cfg.args.contigs.split(','):
+            end = ref.get_reference_length(contig)-1
+            cfg.args.regions.append((contig, 0, end))
 
     # use all contigs
     else:

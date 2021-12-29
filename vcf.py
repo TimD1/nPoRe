@@ -21,13 +21,14 @@ def split_vcf(vcf_fn, vcf_out_pre='', filter_unphased=False):
 
     # read diploid VCF, copying records into hap1 or hap2 VCF
     unphased = True
+    records = False
     for ctg, start, stop in cfg.args.regions:
         for record in vcf.fetch(ctg, start, stop):
+            records = True
 
             # only deal with 1-sample VCFs for now
             for sample in record.samples:
                 gt = record.samples[sample]['GT']
-                break
 
             # TODO: with complex vars, can shorten alleles
             if len(record.alleles) == 3:  # different variants
@@ -92,7 +93,9 @@ def split_vcf(vcf_fn, vcf_out_pre='', filter_unphased=False):
             if gt[0] and not gt[1]: # 1|0 means phased, otherwise all are 0|1
                 unphased = False
 
-    if unphased:
+    if not records:
+        print(f"\nWARNING: VCF file has no variants in selected region.")
+    elif unphased:
         print(f"\nWARNING: VCF file may be unphased.")
 
     # close and index haploid VCFs
@@ -209,12 +212,12 @@ def merge_vcfs(vcf_fn1, vcf_fn2, out_fn=None):
 
 def apply_vcf(vcf_fn, hap):
 
-    cig = ''
-    seq = ''
-    ref_ptr = 0
     vcf = pysam.VariantFile(vcf_fn, 'r')
     data = []
     for contig, start, stop in cfg.args.regions:
+        cig = ''
+        seq = ''
+        ref_ptr = 0
         ref = get_fasta(cfg.args.ref, contig)
         len_ref = len(ref)
         for record in vcf.fetch(contig, start, stop):
@@ -289,14 +292,17 @@ def gen_vcf(hap_data, hap, vcf_out_pre = ''):
         seq_ptr = 0
         cig_ptr = 0
         cig_len = len(cigar)
+        typ = 0
         while cig_ptr < cig_len:
 
             if cigar[cig_ptr] == '=':
+                typ = 0
                 ref_ptr += 1
                 seq_ptr += 1
                 cig_ptr += 1
 
             elif cigar[cig_ptr] == 'X':
+                typ = 0
                 record = vcf_out.header.new_record(
                         contig = contig,
                         start = ref_ptr,
@@ -310,6 +316,7 @@ def gen_vcf(hap_data, hap, vcf_out_pre = ''):
                 cig_ptr += 1
 
             elif cigar[cig_ptr] == 'M':
+                typ = 0
                 # match, don't add to VCF
                 if ref[ref_ptr] == seq[seq_ptr]:
                     ref_ptr += 1
@@ -329,39 +336,55 @@ def gen_vcf(hap_data, hap, vcf_out_pre = ''):
                     cig_ptr += 1
 
             elif cigar[cig_ptr] == 'D':
+                typ = 1
                 del_len = 0
                 while cig_ptr < cig_len and cigar[cig_ptr] == 'D':
                     del_len += 1
                     cig_ptr += 1
-                record = vcf_out.header.new_record(
-                        contig = contig,
-                        start = ref_ptr-1,
-                        alleles = (ref[ref_ptr-1:ref_ptr+del_len], ref[ref_ptr-1]),
-                        qual = 60,
-                        filter = 'PASS'
-                )
-                vcf_out.write(record)
+                if ref_ptr > 0:
+                    record = vcf_out.header.new_record(
+                            contig = contig,
+                            start = ref_ptr-1,
+                            alleles = (ref[ref_ptr-1:ref_ptr+del_len], ref[ref_ptr-1]),
+                            qual = 60,
+                            filter = 'PASS'
+                    )
+                    vcf_out.write(record)
                 ref_ptr += del_len
 
             elif cigar[cig_ptr] == 'I':
+                typ = 2
                 ins_len = 0
                 while cig_ptr < cig_len and cigar[cig_ptr] == 'I':
                     ins_len += 1
                     cig_ptr += 1
-                record = vcf_out.header.new_record(
-                        contig = contig,
-                        start = ref_ptr-1,
-                        alleles = (ref[ref_ptr-1], seq[seq_ptr-1:seq_ptr+ins_len]),
-                        qual = 60,
-                        filter = 'PASS'
-                )
-                vcf_out.write(record)
+                if ref_ptr > 0 and seq_ptr > 0:
+                    record = vcf_out.header.new_record(
+                            contig = contig,
+                            start = ref_ptr-1,
+                            alleles = (ref[ref_ptr-1], seq[seq_ptr-1:seq_ptr+ins_len]),
+                            qual = 60,
+                            filter = 'PASS'
+                    )
+                    vcf_out.write(record)
                 seq_ptr += ins_len
 
             else:
                 print(f"\nERROR: unrecognized CIGAR operation '{cigar[cig_ptr]}'")
                 exit(1)
     vcf_out.close()
+    # except IndexError:
+    #     print(f'INDEX ERROR: ctg: {contig}, hap: {hap}, ref_ptr: {ref_ptr}, len(ref): {len(ref)}, seq_ptr: {seq_ptr}, len(seq): {len(seq)}, cig_ptr: {cig_ptr}, cig_len: {cig_len}, ref_len: {ref_len(cigar)}, seq_len: {seq_len(cigar)}')
+    #     exit(1)
+    # except ValueError:
+    #     print(f'VALUE ERROR: ctg: {contig}, hap: {hap}, ref_ptr: {ref_ptr}, len(ref): {len(ref)}, seq_ptr: {seq_ptr}, len(seq): {len(seq)}, cig_ptr: {cig_ptr}, cig_len: {cig_len}, ref_len: {ref_len(cigar)}, seq_len: {seq_len(cigar)}')
+    #     if typ == 0:
+    #         print(f'M: {ref[ref_ptr]}, {seq[seq_ptr]}')
+    #     elif typ == 1:
+    #         print(f'D: {ref[ref_ptr-1:ref_ptr+del_len]}, {ref[ref_ptr-1]}', del_len)
+    #     elif typ == 2:
+    #         print(f'I: {ref[ref_ptr-1]}, {seq[seq_ptr-1:seq_ptr+ins_len]}', ins_len)
+    #     exit(1)
 
     # wait until file is closed
     while True:

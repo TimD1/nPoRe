@@ -26,6 +26,7 @@ def argparser():
 
     # region of interest
     parser.add_argument("--contig", type=str)
+    parser.add_argument("--contigs", type=str)
     parser.add_argument("--contig_beg", type=int)
     parser.add_argument("--contig_end", type=int)
     parser.add_argument("--max_reads", type=int, default=0)
@@ -90,6 +91,7 @@ def main():
     print('> converting to indexed BAM')
     subprocess.run(["samtools", "view", "-b", 
         "-o", f'{cfg.args.out_prefix}.bam', f'{cfg.args.out_prefix}.sam'])
+    subprocess.run(["rm", f'{cfg.args.out_prefix}.sam'])
     subprocess.run(["samtools", "sort", "-@", f'{os.cpu_count()}', 
         "-o", f'{cfg.args.out_prefix}_sorted.bam', f'{cfg.args.out_prefix}.bam'])
     subprocess.run(["samtools", "calmd", "-b", 

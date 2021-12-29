@@ -459,3 +459,44 @@ def calc_confusion_matrices(range_tuple):
                 end='', flush=True)
 
     return subs, nps, inss, dels
+
+
+
+def hap_to_bam(hap_data, bam_fn_pre=''):
+    bam_fn = f'{bam_fn_pre}haps.bam'
+
+    # generate header
+    ln, sn = 0, 0
+    for ctg, hap, seq, ref, cig in hap_data:
+        ln = len(ref)
+        sn = ctg
+        break
+    header = { 'HD': {
+                   'VN': '1.6', 
+                   'SO': 'coordinate'
+               },
+               'SQ': [{'LN': ln, 'SN': sn}],
+               'PG': [{
+                   'PN': 'realigner',
+                   'ID': 'realigner',
+                   'VN': cfg.__version__,
+                   'CL': ' '.join(sys.argv)
+               }]
+             }
+
+    # write aligned haplotype
+    with pysam.Samfile(bam_fn, 'wb', header=header) as fh:
+        for ctg, hap, seq, ref, cig in hap_data:
+            new_alignment = pysam.AlignedSegment()
+            new_alignment.query_name      = f"hap{hap}"
+            new_alignment.query_sequence  = seq
+            new_alignment.flag            = 0
+            new_alignment.reference_start = 0
+            new_alignment.mapping_quality = 60
+            new_alignment.query_qualities = pysam.qualitystring_to_array('X'*len(seq))
+            new_alignment.tags            = [('HP', hap)]
+            new_alignment.reference_id    = 0
+            new_alignment.cigarstring     = collapse_cigar(cig)
+            fh.write(new_alignment)
+    print(f"    wrote '{bam_fn}'")
+

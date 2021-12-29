@@ -25,9 +25,13 @@ def fix_matrix_properties(scores, delta = 0.01):
 
     for n in range(ns):
 
+        for i in range(3):
+            for j in range(l):
+                scores[n,i,j] = 20
+
         # don't penalize diagonals
         for i in range(1, l):
-            scores[n,i,i] = min(scores[n,i,i], scores[n,i-1,i-1])
+            scores[n,i,i] = 0
 
         # more insertions should be more penalized
         for j in range(1, l):
@@ -353,7 +357,7 @@ cdef int match(char[::1] A, char[::1] B):
 @cython.cdivision(True)
 cpdef align(char[::1] full_ref, char[::1] seq, str cigar, 
         float[:,::1] sub_scores, float[:,:,::1] np_scores, 
-        float indel_start=5, float indel_extend=2, int max_b_rows = 20000,
+        float indel_start=5, float indel_extend=1, int max_b_rows = 20000,
         int r = 30, int verbose=0):
     ''' Perform alignment.  '''
 
@@ -650,13 +654,32 @@ cpdef align(char[::1] full_ref, char[::1] seq, str cigar,
             # if verbose: # do some error-checking
             path.append((MAT, a_row, a_col))
             if a_row < 0:
-                print(f"ERROR: row < 0 @ A:({a_row},{a_col}), B:({b_row},{b_col})")
+                print(f"\nERROR: row < 0 @ A:({a_row},{a_col}), B:({b_row},{b_col})")
+                with open(f'{cfg.args.out_prefix}.log', 'a+') as fh:
+                    print(f'val: {val}, typ: {typ}, run: {run}, a_row: {a_row}, a_col: {a_col}, b_row: {b_row}, b_col: {b_col}', file=fh)
+                    print(f'path: {path}', file=fh)
+                    print(f'aln: {aln}', file=fh)
+                    print(f'ref: {ref}', file=fh)
+                    print(f'seq: {seq}\n', file=fh)
+
                 break
             if a_col < 0:
-                print(f"ERROR: col < 0 @ A:({a_row},{a_col}), B:({b_row},{b_col})")
+                print(f"\nERROR: col < 0 @ A:({a_row},{a_col}), B:({b_row},{b_col})")
+                with open(f'{cfg.args.out_prefix}.log', 'a+') as fh:
+                    print(f'val: {val}, typ: {typ}, run: {run}, a_row: {a_row}, a_col: {a_col}, b_row: {b_row}, b_col: {b_col}', file=fh)
+                    print(f'path: {path}', file=fh)
+                    print(f'aln: {aln}', file=fh)
+                    print(f'ref: {ref}', file=fh)
+                    print(f'seq: {seq}\n', file=fh)
                 break
             if run < 1:
                 print(f"\nERROR: run 0 @ A:({a_row},{a_col}), B:({b_row},{b_col}),  type {typ}, val {val}")
+                with open(f'{cfg.args.out_prefix}.log', 'a+') as fh:
+                    print(f'val: {val}, typ: {typ}, run: {run}, a_row: {a_row}, a_col: {a_col}, b_row: {b_row}, b_col: {b_col}', file=fh)
+                    print(f'path: {path}', file=fh)
+                    print(f'aln: {aln}', file=fh)
+                    print(f'ref: {ref}', file=fh)
+                    print(f'seq: {seq}\n', file=fh)
                 break
 
             op = ''

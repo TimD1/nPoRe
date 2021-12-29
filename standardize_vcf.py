@@ -28,7 +28,7 @@ def main():
 
     print(f"> realigning hap sequences")
     with cfg.counter.get_lock(): cfg.counter.value = 0
-    with mp.Pool() as pool:
+    with mp.Pool(10) as pool:
         data = pool.map(realign_hap, hap1_data + hap2_data)
     hap1_data = [ x for x in data if x[1] == 1 ]
     hap2_data = [ x for x in data if x[1] == 2 ]
@@ -57,6 +57,7 @@ def argparser():
     parser.add_argument("--contig", type=str)
     parser.add_argument("--contig_beg", type=int)
     parser.add_argument("--contig_end", type=int)
+    parser.add_argument("--contigs", type=str)
 
     parser.add_argument("--stats_dir", default="./stats")
     parser.add_argument("--recalc_cms", action="store_true")
