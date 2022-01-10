@@ -7,6 +7,32 @@ from util import *
 import cfg
 
 
+def filter_overlaps(in_vcf_fn, out_vcf_fn):
+    ''' 
+    Filter overlapping variants in VCF
+
+    3   ATTTTTTT   A        # kept
+    5   T          C        # removed
+    6   TTTT       T        # removed
+    '''
+    in_vcf = pysam.VariantFile(in_vcf_fn, 'r')
+    out_vcf = pysam.VariantFile(out_vcf_fn, 'w', header=in_vcf.header)
+
+    prev_contig = ""
+    prev_stop = 0
+    for record in in_vcf.fetch():
+        if record.contig != prev_contig:
+            prev_stop = 0
+            prev_contig = record.contig
+        if record.start < prev_stop: # exclusive
+            continue
+        else:
+            out_vcf.write(record)
+            prev_stop = record.stop
+    out_vcf.close()
+
+
+
 def split_vcf(vcf_fn, vcf_out_pre='', filter_unphased=False):
     '''
     Splits phased VCF into hapVCFs.
@@ -32,19 +58,22 @@ def split_vcf(vcf_fn, vcf_out_pre='', filter_unphased=False):
 
             # TODO: with complex vars, can shorten alleles
             if len(record.alleles) == 3:  # different variants
-                record1 = record.copy()
-                for sample in record1.samples:
-                    record1.samples[sample]['GT'] = ()
-                alleles1 = [record.alleles[0], record.alleles[gt[0]]]
-                record1.alleles = alleles1
-                vcf_out1.write(record1)
 
-                record2 = record.copy()
-                for sample in record2.samples:
-                    record2.samples[sample]['GT'] = ()
-                alleles2 = [record.alleles[0], record.alleles[gt[1]]]
-                record2.alleles = alleles2
-                vcf_out2.write(record2)
+                if record.alleles[gt[0]] != '*': # skip spanning deletion
+                    record1 = record.copy()
+                    for sample in record1.samples:
+                        record1.samples[sample]['GT'] = ()
+                    alleles1 = [record.alleles[0], record.alleles[gt[0]]]
+                    record1.alleles = alleles1
+                    vcf_out1.write(record1)
+
+                if record.alleles[gt[1]] != '*':
+                    record2 = record.copy()
+                    for sample in record2.samples:
+                        record2.samples[sample]['GT'] = ()
+                    alleles2 = [record.alleles[0], record.alleles[gt[1]]]
+                    record2.alleles = alleles2
+                    vcf_out2.write(record2)
 
             elif gt[0] and gt[1]:          # same hap1 and hap2 variant
                 record1 = record.copy()
