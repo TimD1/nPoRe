@@ -56,7 +56,6 @@ def split_vcf(vcf_fn, vcf_out_pre='', filter_unphased=False):
             for sample in record.samples:
                 gt = record.samples[sample]['GT']
 
-            # TODO: with complex vars, can shorten alleles
             if len(record.alleles) == 3:  # different variants
 
                 if record.alleles[gt[0]] != '*': # skip spanning deletion
@@ -178,47 +177,15 @@ def merge_vcfs(vcf_fn1, vcf_fn2, out_fn=None):
                         record.samples[sample]['GT'] = (1,1)
                     vcf_out.write(record)
 
-                else:                                        # diff 1|2
+                else:                                        # diff (separate)
                     record = record1.copy()
-                    indel_len1 = len(record1.alleles[1]) - len(record1.alleles[0])
-                    indel_len2 = len(record2.alleles[1]) - len(record2.alleles[0])
-
-                    if indel_len1 >= 0 and indel_len2 >= 0: # both sub/ins
-                        record.alleles = (
-                                record1.alleles[0], 
-                                record1.alleles[1], 
-                                record2.alleles[1])
-
-                    if indel_len1 < 0 and indel_len2 < 0: # both del
-                        reflen_diff = len(record1.alleles[0]) - len(record2.alleles[0])
-                        if reflen_diff > 0: # hap1 longer del
-                            record.alleles = (
-                                    record1.alleles[0], 
-                                    record1.alleles[1], 
-                                    record2.alleles[1] + record1.alleles[0] \
-                                        [len(record2.alleles[0]):len(record1.alleles[0])])
-                        else:               # same, hap2 longer del
-                            reflen_diff = abs(reflen_diff)
-                            record.alleles = (
-                                    record2.alleles[0], 
-                                    record1.alleles[1] + record2.alleles[0]\
-                                        [len(record1.alleles[0]):len(record2.alleles[0])], 
-                                    record2.alleles[1])
-
-                    elif indel_len1 < 0 and indel_len2 >= 0:
-                        record.alleles = (
-                                record1.alleles[0], 
-                                record1.alleles[1], 
-                                record2.alleles[1] + record1.alleles[0][1:])
-
-                    elif indel_len2 < 0 and indel_len1 >= 0:
-                        record.alleles = (
-                                record2.alleles[0], 
-                                record2.alleles[1], 
-                                record1.alleles[1] + record2.alleles[0][1:])
-
                     for sample in record.samples:
-                        record.samples[sample]['GT'] = (1,2)
+                        record.samples[sample]['GT'] = (1,0)
+                    vcf_out.write(record)
+
+                    record = record2.copy()
+                    for sample in record.samples:
+                        record.samples[sample]['GT'] = (0,1)
                     vcf_out.write(record)
 
             elif hap1:                                       # 1|0
@@ -251,25 +218,34 @@ def apply_vcf(vcf_fn, hap):
         len_ref = len(ref)
         for record in vcf.fetch(contig, start, stop):
             pos = record.pos - 1
-            if not record.qual or record.qual < cfg.args.min_qual:
+            if cfg.args.min_qual and not record.qual or \
+                    record.qual and record.qual < cfg.args.min_qual:
                 continue
 
-            if pos < ref_ptr: # overlapping indels, allow second if insertion
+            if pos < ref_ptr: # new variant overlaps previous DEL
                 indel_len = len(record.alleles[1]) - len(record.alleles[0])
-                if indel_len > 0:
+
+                if indel_len > 0: # allow insertions
                     seq += record.alleles[1][len(record.alleles[0]):]
                     cig += 'I' * indel_len
+
+                elif indel_len < 0 and pos == ref_ptr - 1: # deletion, but only first base overlaps
+                    indel_len = abs(indel_len)
+                    cig += 'D' * indel_len
+                    ref_ptr += indel_len
+
                 continue
-            else:
+
+            else: # no overlap, add '=' until new variant
                 seq += ref[ref_ptr:pos]
                 cig += '=' * (pos - ref_ptr)
                 ref_ptr += pos-ref_ptr
 
-            # compare current position for sub/ins/del
+            # check if current variant is sub/ins/del
             seq += record.alleles[1]
             minlen = min(len(record.alleles[0]), len(record.alleles[1]))
             for i in range(minlen):
-                if record.alleles[0][i] == record.alleles[1][i]:
+                if record.alleles[0][i] == record.alleles[1][i]: # sub/match
                     cig += '='
                     ref_ptr += 1
                 else:
@@ -391,7 +367,7 @@ def gen_vcf(hap_data, hap, vcf_out_pre = ''):
                     record = vcf_out.header.new_record(
                             contig = contig,
                             start = ref_ptr-1,
-                            alleles = (ref[ref_ptr-1], seq[seq_ptr-1:seq_ptr+ins_len]),
+                            alleles = (ref[ref_ptr-1], ref[ref_ptr-1] + seq[seq_ptr:seq_ptr+ins_len]),
                             qual = 60,
                             filter = 'PASS'
                     )
