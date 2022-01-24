@@ -2,13 +2,10 @@ import numpy as np
 import math
 np.set_printoptions(linewidth=200)
 import matplotlib.pyplot as plt
-from mpl_toolkits import mplot3d
-import scipy.ndimage as ndimage
-
+from scipy import ndimage
 import cython
 
 import cfg
-
 from cig import *
 
 
@@ -25,13 +22,15 @@ def fix_matrix_properties(scores, delta = 0.01):
 
     for n in range(ns):
 
-        for i in range(3):
-            for j in range(l):
-                scores[n,i,j] = 20
-
         # don't penalize diagonals
         for i in range(1, l):
             scores[n,i,i] = 0
+
+        # if we have no evidence, default to high penalty
+        for i in range(l):
+            for j in range(l):
+                if i != j and scores[n,i,j] == 0:
+                    scores[n,i,j] = 20
 
         # more insertions should be more penalized
         for j in range(1, l):
@@ -51,40 +50,13 @@ def fix_matrix_properties(scores, delta = 0.01):
                         scores[n,i-1,j] + delta
                 )
 
-        # prefer insertions from longer homopolymers
-        best = np.ones(l) * INF
-        for j in range(1,l):
-            for i in range(j-1, -1, -1):
-                ins_len = j - i
-                if scores[n,i,j] < best[ins_len]:
-                    best[ins_len] = scores[n,i,j]
-                    for total_ins_len in range(ins_len+1, l):
-                        best[total_ins_len] = min(
-                                best[total_ins_len], 
-                                best[ins_len] + best[total_ins_len-ins_len]
-                        )
-                else:
-                    scores[n,i,j] = min(
-                            scores[n,i,j], 
-                            best[ins_len] - delta
-                    )
-
-        # prefer deletions from longer homopolymers
-        best = np.ones(l) * INF
+        # prefer INDELs in longer npolymers
         for i in range(1,l):
-            for j in range(i-1, -1, -1):
-                del_len = i - j
-                if scores[n,i,j] < best[del_len]:
-                    best[del_len] = scores[n,i,j]
-                    for total_del_len in range(del_len+1, l):
-                        best[total_del_len] = min(
-                                best[total_del_len], 
-                                best[del_len] + best[total_del_len-del_len]
-                        )
-                else:
+            for j in range(1,l):
+                if i != j:
                     scores[n,i,j] = min(
-                            scores[n,i,j], 
-                            best[del_len] - delta
+                            scores[n,i,j],
+                            scores[n,i-1,j-1]-delta,
                     )
 
     return scores
@@ -102,6 +74,7 @@ def calc_score_matrices(subs, nps, inss, dels, eps=0.01):
                 count = int(nps[n, ref_len, call_len])
                 frac = (count + eps) / (total + eps)
                 np_scores[n, ref_len, call_len] = -np.log(frac)
+        nps[n] = ndimage.gaussian_filter(nps[n], sigma=1)
     np_scores = fix_matrix_properties(np_scores)
 
     # calculate substitution scores matrix
@@ -129,37 +102,59 @@ def calc_score_matrices(subs, nps, inss, dels, eps=0.01):
 
 
 
-def plot_np_score_matrices(nps, max_np_len = 20):
+def plot_np_score_matrices(nps, max_np_len = 50):
     for n in range(cfg.args.max_np):
 
         # score matrix
-        plt.figure(figsize=(max_np_len,max_np_len))
-        plt.matshow(nps[n,:max_np_len, :max_np_len], cmap='RdYlGn_r',)
-        for i in range(max_np_len):
-            for j in range(max_np_len):
+        med_np_len = 20
+        plt.figure(figsize=(med_np_len,med_np_len))
+        plt.matshow(nps[n,:med_np_len, :med_np_len], cmap='RdYlGn_r',)
+        for i in range(med_np_len):
+            for j in range(med_np_len):
                 plt.text(x=j, y=i, s=f'{nps[n,i,j]:.1f}', fontsize=5, 
                         va='center', ha='center')
         plt.xlabel('Called')
         plt.ylabel('Actual')
-        plt.xticks(range(max_np_len))
-        plt.yticks(range(max_np_len))
+        plt.xticks(range(med_np_len))
+        plt.yticks(range(med_np_len))
         plt.title(f'{n+1}-Polymer Score Matrix')
         plt.savefig(f'{cfg.args.stats_dir}/{n+1}-polymer_scores.png', dpi=300)
         plt.close()
 
         # surface plot
-        x, y = np.meshgrid(range(max_np_len), range(max_np_len))
+        x, y = np.meshgrid(range(3,max_np_len), range(3,max_np_len))
         fig = plt.figure(figsize=(20,10))
         ax1 = fig.add_subplot(1,2,1, projection='3d')
         ax2 = fig.add_subplot(1,2,2, projection='3d')
         ax1.plot_trisurf(x.flatten(), -y.flatten(), 
-                nps[n,:max_np_len,:max_np_len].flatten(), 
+                nps[n,3:max_np_len,3:max_np_len].flatten(), 
                 cmap='RdYlGn_r', edgecolor='none')
         ax2.plot_trisurf(-x.flatten(), -y.flatten(), 
-                nps[n,:max_np_len,:max_np_len].flatten(), 
+                nps[n,3:max_np_len,3:max_np_len].flatten(), 
                 cmap='RdYlGn_r', edgecolor='none')
         plt.tight_layout()
         plt.savefig(f'{cfg.args.stats_dir}/{n+1}-polymer_scores_surface.png', dpi=200)
+        plt.close()
+
+        # best-fit plot
+        xs = []
+        ys = []
+        for i in range(max_np_len):
+            for j in range(max_np_len):
+                xs.append((i-j)/(i+j+1))
+                ys.append(nps[n,i,j])
+        fig = plt.figure(figsize=(10,10))
+        plt.plot(xs, ys)
+        plt.tight_layout()
+        plt.savefig(f'{cfg.args.stats_dir}/{n+1}-polymer_scores_plot.png', dpi=200)
+        plt.close()
+
+        # contour plot
+        fig = plt.figure(figsize=(20,20))
+        plt.contour(x, y, nps[n, 3:max_np_len, 3:max_np_len], 
+                levels=list(range(20)), cmap='RdYlGn_r')
+        plt.tight_layout()
+        plt.savefig(f'{cfg.args.stats_dir}/{n+1}-polymer_scores_contour.png', dpi=200)
         plt.close()
 
 
