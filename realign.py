@@ -32,7 +32,7 @@ def argparser():
     parser.add_argument("--max_reads", type=int, default=0)
 
     # algorithm parameters
-    parser.add_argument("--max_np", type=int, default=10)
+    parser.add_argument("--max_np", type=int, default=6)
     parser.add_argument("--max_np_len", type=int, default=100)
     parser.add_argument("--chunk_width", type=int, default=1000000)
 
@@ -86,19 +86,6 @@ def main():
         pool.close()
         pool.join()
     print(f'\n    runtime: {perf_counter()-start:.2f}s')
-
-    print('> converting to indexed BAM')
-    subprocess.run(["samtools", "view", "-b", 
-        "-o", f'{cfg.args.out_prefix}.bam', f'{cfg.args.out_prefix}.sam'])
-    subprocess.run(["rm", f'{cfg.args.out_prefix}.sam'])
-    subprocess.run(["samtools", "sort", "-@", f'{os.cpu_count()}', 
-        "-o", f'{cfg.args.out_prefix}_sorted.bam', f'{cfg.args.out_prefix}.bam'])
-    subprocess.run(["samtools", "calmd", "-b", 
-        f'{cfg.args.out_prefix}_sorted.bam', cfg.args.ref], 
-        stdout=open(f'{cfg.args.out_prefix}.bam', 'w'), stderr=subprocess.DEVNULL)
-    subprocess.run(["rm", f'{cfg.args.out_prefix}_sorted.bam'])
-    subprocess.run(["samtools", "index" , "-@", f'{os.cpu_count()}', 
-        f'{cfg.args.out_prefix}.bam'])
 
 
 
