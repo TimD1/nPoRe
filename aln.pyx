@@ -516,16 +516,6 @@ cpdef align(char[::1] full_ref, char[::1] seq, str cigar,
                         matrix[INS, b_row, b_col, TYP] = INS
                         matrix[INS, b_row, b_col, RUN] = run
 
-                    val3 = matrix[NPI, b_top_row, b_top_col, VAL] + indel_extend
-                    if val3 < val1 and val3 < val2:
-                        if a_row == inss[brk] + 1:
-                            run = 1
-                        else:
-                            run = <int>(matrix[NPI, b_top_row, b_top_col, RUN]) + 1
-                        matrix[INS, b_row, b_col, VAL] = val3
-                        matrix[INS, b_row, b_col, TYP] = INS
-                        matrix[INS, b_row, b_col, RUN] = run
-
 
                 # UPDATE DEL MATRIX
                 if a_col == dels[brk]: # first col
@@ -545,16 +535,6 @@ cpdef align(char[::1] full_ref, char[::1] seq, str cigar,
                         else:
                             run = <int>(matrix[DEL, b_left_row, b_left_col, RUN]) + 1
                         matrix[DEL, b_row, b_col, VAL] = val2
-                        matrix[DEL, b_row, b_col, TYP] = DEL
-                        matrix[DEL, b_row, b_col, RUN] = run
-
-                    val3 = matrix[NPD, b_left_row, b_left_col, VAL] + indel_extend
-                    if val3 < val1 and val3 < val2:
-                        if a_col == dels[brk] + 1:
-                            run = 1
-                        else:
-                            run = <int>(matrix[NPD, b_left_row, b_left_col, RUN]) + 1
-                        matrix[DEL, b_row, b_col, VAL] = val3
                         matrix[DEL, b_row, b_col, TYP] = DEL
                         matrix[DEL, b_row, b_col, RUN] = run
 
