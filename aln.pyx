@@ -137,14 +137,33 @@ def plot_np_score_matrices(nps, max_np_len = 50):
         plt.close()
 
         # best-fit plot
-        xs = []
-        ys = []
-        for i in range(max_np_len):
-            for j in range(max_np_len):
-                xs.append((i-j)/(i+j+1))
+        fig, ax = plt.subplots(1,2, figsize=(20,10))
+
+        for i in range(3,med_np_len):
+            xs = []
+            ys = []
+            for j in range(i, med_np_len):
+                xs.append(j-i)
                 ys.append(nps[n,i,j])
-        fig = plt.figure(figsize=(10,10))
-        plt.plot(xs, ys)
+            ax[0].plot(xs, ys)
+
+        for i in range(3,med_np_len):
+            xs = []
+            ys = []
+            for j in range(i, 2, -1):
+                xs.append(i-j)
+                ys.append(nps[n,i,j])
+            ax[1].plot(xs, ys)
+
+        ax[0].set_title('INSs')
+        ax[0].set_xlabel('INS Length')
+        ax[0].set_ylabel('Score')
+
+        ax[1].legend([f'HP len {x}' for x in range(3,med_np_len)])
+        ax[1].set_title('DELs')
+        ax[1].set_xlabel('DEL Length')
+        ax[1].set_ylabel('Score')
+
         plt.tight_layout()
         plt.savefig(f'{cfg.args.stats_dir}/{n+1}-polymer_scores_plot.png', dpi=200)
         plt.close()
@@ -168,34 +187,34 @@ cpdef int[:,::1] get_np_info(char[::1] seq):
          seq:     A T A T A T T T T T T T A A A G C
 
          np_info:
-         RPTS:    3 3 3 3 3 7 7 7 7 7 7 7 3 3 3 0 0
-         RPT:     0 0 1 1 2 0 1 2 3 4 5 6 0 1 2 0 0
+         L:       3 3 3 3 3 7 7 7 7 7 7 7 3 3 3 0 0
+         L_IDX:   0 0 1 1 2 0 1 2 3 4 5 6 0 1 2 0 0
          N:       2 2 2 2 2 1 1 1 1 1 1 1 1 1 1 0 0
-         IDX:     0 1 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0
+         N_IDX:   0 1 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0
          
-         RPTS = number of times the sequence is repeated
-         RPT = 0-based index of the current repeat
+         L = number of times the sequence is repeated
+         L_IDX = 0-based index of the current repeat
          N = number of bases in repeated sequence
-         IDX = 0-based index of current base within repeat
+         N_IDX = 0-based index of current base within repeat
 
          Explanation:
          3(AT), 7(T), 3(A) with some overlap. A sequence must repeat at least 
          twice to be considered an n-polymer. Bases are considered part of 
-         the longest repeat in which they're included (N * RPTS).
+         the longest repeat in which they're included (N * L).
 
     '''
 
     cdef int seq_len = len(seq)
     np_info_buf = np.zeros((4, seq_len), dtype=np.intc)
     cdef int[:,::1] np_info = np_info_buf
-    cdef int n, np_repeat_len, pos, rpt, idx
+    cdef int n, l, pos, l_idx, n_idx
     cdef int seq_idx, seq_ptr
 
     # define constant values for indexing into `np_info` array
-    cdef int RPTS = 0
-    cdef int RPT = 1
+    cdef int L = 0
+    cdef int L_IDX = 1
     cdef int N = 2
-    cdef int IDX = 3
+    cdef int N_IDX = 3
 
     for seq_idx in range(seq_len): # iterate over sequence
 
@@ -203,24 +222,24 @@ cpdef int[:,::1] get_np_info(char[::1] seq):
         for n in range(1, cfg.args.max_np+1): # check each length N-polymer
 
             # get np repeat length at this position
-            np_repeat_len = 0
+            l = 0
             seq_ptr = seq_idx
             while seq_ptr+n < seq_len and seq[seq_ptr] == seq[seq_ptr+n]:
                 seq_ptr += 1
                 if (seq_ptr-seq_idx) % n == 0: # finished n-polymer
-                    np_repeat_len += 1
-            if np_repeat_len: np_repeat_len += 1 # count first
+                    l += 1
+            if l: l += 1 # count first
 
             # save n-polymer info
-            if np_repeat_len > 2 and \
-                    n * np_repeat_len > np_info[N, seq_idx] * np_info[RPTS, seq_idx]:
-                for rpt in range(np_repeat_len):
-                    for idx in range(n):
-                        pos = seq_idx + rpt*n + idx
-                        np_info[RPTS, pos] = np_repeat_len
-                        np_info[RPT, pos] = rpt
+            if l > 2 and \
+                    n * l > np_info[N, seq_idx] * np_info[L, seq_idx]:
+                for l_idx in range(l):
+                    for n_idx in range(n):
+                        pos = seq_idx + l_idx*n + n_idx
+                        np_info[L, pos] = l
+                        np_info[L_IDX, pos] = l_idx
                         np_info[N, pos] = n
-                        np_info[IDX, pos] = idx
+                        np_info[N_IDX, pos] = n_idx
 
     return np_info
 
@@ -407,7 +426,7 @@ cpdef align(char[::1] full_ref, char[::1] seq, str cigar,
     cdef int b_runleft_row, b_runleft_col, b_runup_row, b_runup_col
     cdef int b_ndown_row, b_ndown_col, b_nright_row, b_nright_col
     cdef int run, typ, i, brk, next_brk, brk_idx
-    cdef int rpts, rpt, n, idx
+    cdef int l, l_idx, n, n_idx
     cdef int max_np_len = cfg.args.max_np_len
     cdef float val1, val2
 
@@ -468,12 +487,12 @@ cpdef align(char[::1] full_ref, char[::1] seq, str cigar,
 
                 # get n-polymer info
                 if a_col >= a_cols - 1:
-                    rpts = rpt = n = idx = 0
+                    l = l_idx = n = n_idx = 0
                 else:
-                    rpts = np_info[RPTS, ref_idx+1]
-                    rpt = np_info[RPT, ref_idx+1]
+                    l = np_info[RPTS, ref_idx+1]
+                    l_idx = np_info[RPT, ref_idx+1]
                     n = np_info[N, ref_idx+1]
-                    idx = np_info[IDX, ref_idx+1]
+                    n_idx = np_info[IDX, ref_idx+1]
 
 
                 # UPDATE INS MATRIX
@@ -577,17 +596,17 @@ cpdef align(char[::1] full_ref, char[::1] seq, str cigar,
                 b_ndown_row = a_to_b_row(a_row+n, a_col, inss, dels, r) - brk
                 b_ndown_col = a_to_b_col(a_row+n, a_col, inss, dels, r)
                 if a_row+n <= inss[next_brk] and b_ndown_col > 0: # np spans breakpoint
-                    if n > 0 and idx == 0 and rpt == 0 and \
+                    if n > 0 and n_idx == 0 and l_idx == 0 and \
                             match(ref[ref_idx+1:ref_idx+n+1], 
                                     seq[seq_idx+1:seq_idx+1+n]):
                         val1 = matrix[MAT, b_row, b_col, VAL] + \
-                                np_score(n, rpts, 1, np_scores, max_np_len)
+                                np_score(n, l, 1, np_scores, max_np_len)
                         matrix[NPI, b_ndown_row, b_ndown_col, VAL] = val1
                         matrix[NPI, b_ndown_row, b_ndown_col, TYP] = NPI
                         matrix[NPI, b_ndown_row, b_ndown_col, RUN] = n
 
                     # continue insertion
-                    elif n > 0 and idx == 0 and \
+                    elif n > 0 and n_idx == 0 and \
                             match(ref[ref_idx+1:ref_idx+n+1], 
                                     seq[seq_idx+1:seq_idx+1+n]): 
                         run = <int>(matrix[NPI, b_row, b_col, RUN]) + n
@@ -595,7 +614,7 @@ cpdef align(char[::1] full_ref, char[::1] seq, str cigar,
                         b_runup_col = a_to_b_col(a_row+n-run, a_col, inss, dels, r)
                         if run > n and a_row+n-run >= inss[brk] and b_runup_col < 2*r:
                             val2 = matrix[NPI, b_runup_row, b_runup_col, VAL] + \
-                                np_score(n, rpts, <int>(run/n), np_scores, max_np_len)
+                                np_score(n, l, <int>(run/n), np_scores, max_np_len)
                             matrix[NPI, b_ndown_row, b_ndown_col, VAL] = val2
                             matrix[NPI, b_ndown_row, b_ndown_col, TYP] = NPI
                             matrix[NPI, b_ndown_row, b_ndown_col, RUN] = run
@@ -610,20 +629,20 @@ cpdef align(char[::1] full_ref, char[::1] seq, str cigar,
                 b_nright_row = a_to_b_row(a_row, a_col+n, inss, dels, r) - brk
                 b_nright_col = a_to_b_col(a_row, a_col+n, inss, dels, r)
                 if a_col+n <= dels[next_brk] and b_nright_col < 2*r: # np spans breakpoint
-                    if n > 0 and idx == 0 and rpt == 0: # start deletion
+                    if n > 0 and n_idx == 0 and l_idx == 0: # start deletion
                         val1 = matrix[MAT, b_row, b_col, VAL] + \
-                            np_score(n, rpts, -1, np_scores, max_np_len)
+                            np_score(n, l, -1, np_scores, max_np_len)
                         matrix[NPD, b_nright_row, b_nright_col, VAL] = val1
                         matrix[NPD, b_nright_row, b_nright_col, TYP] = NPD
                         matrix[NPD, b_nright_row, b_nright_col, RUN] = n
 
-                    elif n > 0 and idx == 0: # continue deletion
+                    elif n > 0 and n_idx == 0: # continue deletion
                         run = <int>(matrix[NPD, b_row, b_col, RUN]) + n
                         b_runleft_row = a_to_b_row(a_row, a_col+n-run, inss, dels, r) - brk
                         b_runleft_col = a_to_b_col(a_row, a_col+n-run, inss, dels, r)
                         if run > n and a_col+n-run >= dels[brk] and b_runleft_col > 0:
                             val2 = matrix[NPD, b_runleft_row, b_runleft_col, VAL] + \
-                                np_score(n, rpts, <int>(-run/n), np_scores, max_np_len)
+                                np_score(n, l, <int>(-run/n), np_scores, max_np_len)
                             matrix[NPD, b_nright_row, b_nright_col, VAL] = val2
                             matrix[NPD, b_nright_row, b_nright_col, TYP] = NPD
                             matrix[NPD, b_nright_row, b_nright_col, RUN] = run
