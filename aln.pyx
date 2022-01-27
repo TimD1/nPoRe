@@ -178,42 +178,47 @@ def plot_np_score_matrices(nps, max_np_len = 50):
 @cython.boundscheck(False)
 @cython.wraparound(False)
 @cython.cdivision(True)
-cpdef int[:,::1] get_np_info(char[::1] seq):
+cpdef int[:,:,::1] get_np_info(char[::1] seq):
     ''' Calculate N-polymer information. 
 
-         seq:     A T A T A T T T T T T T A A A G C
+         seq:     A T A T A T A T T T T T T A A A G C G C G C
 
-         np_info:
-         L:       3 3 3 3 3 7 7 7 7 7 7 7 3 3 3 0 0
-         L_IDX:   0 0 1 1 2 0 1 2 3 4 5 6 0 1 2 0 0
-         N:       2 2 2 2 2 1 1 1 1 1 1 1 1 1 1 0 0
+         N = 1
+         L:       0 0 0 0 0 0 0 6 6 6 6 6 6 3 3 3 0 0 0 0 0 0
+         L_IDX:   0 0 0 0 0 0 0 0 1 2 3 4 5 0 1 2 0 0 0 0 0 0
+
+         N = 2
+         L:       4 3 4 3 4 3 4 0 0 0 0 0 0 0 0 0 3 0 3 0 3 0
+         L_IDX:   0 0 1 1 2 2 3 0 0 0 0 0 0 0 0 0 0 0 1 0 2 0
+
+         N = 3
+         L:       0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+         L_IDX:   0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
          
          L = number of times the sequence is repeated
          L_IDX = 0-based index of the current repeat
          N = number of bases in repeated sequence
 
-         Explanation:
-         3(AT), 7(T), 3(A) with some overlap. A sequence must repeat at least 
-         twice to be considered an n-polymer. Bases are considered part of 
-         the longest repeat in which they're included (N * L).
-
+         Explanation: shape (len(seq), 2, N)
+         4(AT), 3(TA), 6(T), 3(A), 3(GC) with some overlap.  A sequence must 
+         repeat at least three times to be considered an n-polymer. Note that
+         6(T) is not considered to also be 3(TT).
     '''
 
     cdef int seq_len = len(seq)
-    np_info_buf = np.zeros((3, seq_len), dtype=np.intc)
-    cdef int[:,::1] np_info = np_info_buf
-    cdef int n, l, pos, l_idx
+    np_info_buf = np.zeros((seq_len, 2, cfg.args.max_np), dtype=np.intc)
+    cdef int[:,:,::1] np_info = np_info_buf
+    cdef int n, l, pos, l_idx, n2, longest
     cdef int seq_idx, seq_ptr
 
     # define constant values for indexing into `np_info` array
     cdef int L = 0
     cdef int L_IDX = 1
-    cdef int N = 2
 
     for seq_idx in range(seq_len): # iterate over sequence
 
-        best_len = 0
         for n in range(1, cfg.args.max_np+1): # check each length N-polymer
+            n_idx = n-1
 
             # get np repeat length at this position
             l = 0
@@ -224,14 +229,20 @@ cpdef int[:,::1] get_np_info(char[::1] seq):
                     l += 1
             if l: l += 1 # count first
 
-            # save n-polymer info
-            if l > 2 and \
-                    n * l > np_info[N, seq_idx] * np_info[L, seq_idx]:
+            # save n-polymer info, if long enough
+            if l > 2:
+                # don't overwrite equivalent: 6T with 3(TT)
+                longest = True
+                for n2 in range(1, n):
+                    if l*n <= np_info[seq_idx, L, n2-1]*n2: 
+                        longest = False
+
+                # don't overwrite previous: 6T with 5T with 4T...
                 for l_idx in range(l):
                     pos = seq_idx + l_idx*n
-                    np_info[L, pos] = l
-                    np_info[L_IDX, pos] = l_idx
-                    np_info[N, pos] = n
+                    if longest and l > np_info[pos, L, n_idx]:
+                        np_info[pos, L, n_idx] = l
+                        np_info[pos, L_IDX, n_idx] = l_idx
 
     return np_info
 
@@ -361,7 +372,7 @@ cdef int match(char[::1] A, char[::1] B):
 @cython.boundscheck(False)
 @cython.wraparound(False)
 @cython.cdivision(True)
-cpdef align(char[::1] full_ref, char[::1] seq, str cigar, 
+cpdef align(char[::1] ref, char[::1] seq, str cigar, 
         float[:,::1] sub_scores, float[:,:,::1] np_scores, 
         float indel_start=5, float indel_extend=1, int max_b_rows = 20000,
         int r = 30, int verbose=0):
@@ -373,13 +384,12 @@ cpdef align(char[::1] full_ref, char[::1] seq, str cigar,
     # precompute offsets, breakpoints, and homopolymers
     cdef int[::1] inss = get_inss(cigar)
     cdef int[::1] dels = get_dels(cigar)
-    cdef int[::1] breaks = get_breaks(max_b_rows, len(seq) + len(full_ref) + 1, inss, dels)
-    cdef int[:,::1] np_info
-    cdef char[::1] ref
+    cdef int[::1] breaks = get_breaks(max_b_rows, len(seq) + len(ref) + 1, inss, dels)
+    cdef int[:,:,::1] np_info, np_info_seq
 
     # define useful constants
     cdef int a_rows = len(seq) + 1
-    cdef int a_cols = len(full_ref) + 1
+    cdef int a_cols = len(ref) + 1
     cdef int b_cols = 2*r + 1
     cdef int b_rows = -1
 
@@ -416,10 +426,18 @@ cpdef align(char[::1] full_ref, char[::1] seq, str cigar,
     cdef int b_top_row, b_top_col, b_left_row, b_left_col, b_diag_row, b_diag_col
     cdef int b_runleft_row, b_runleft_col, b_runup_row, b_runup_col
     cdef int b_ndown_row, b_ndown_col, b_nright_row, b_nright_col
-    cdef int run, typ, i, brk, next_brk, brk_idx
-    cdef int l, l_idx, n, l_seq, l_idx_seq, n_seq
+    cdef int run, typ, i, brk, next_brk, brk_idx, n, n_seq, end_idx
+    cdef int[::1] l, l_idx, l_seq, l_idx_seq
     cdef int max_np_len = cfg.args.max_np_len
+    cdef int max_np = cfg.args.max_np
     cdef float val1, val2
+
+    if verbose:
+        print("REF:")
+        print_np_info(ref)
+        print("SEQ:")
+        print_np_info(seq)
+
 
     # iterate over b matrix in chunks set by breakpoints
     for brk_idx in range(len(breaks)-1):
@@ -428,7 +446,6 @@ cpdef align(char[::1] full_ref, char[::1] seq, str cigar,
         next_brk = breaks[brk_idx+1]
         b_rows = next_brk - brk + 1
         matrix_buf.fill(0)
-        ref = full_ref[ dels[brk] : dels[next_brk]+1 ]
         np_info = get_np_info(ref)
         np_info_seq = get_np_info(seq)
 
@@ -461,7 +478,7 @@ cpdef align(char[::1] full_ref, char[::1] seq, str cigar,
                 b_left_col = a_to_b_col(a_row, a_col-1, inss, dels, r)
                 b_diag_row = a_to_b_row(a_row-1, a_col-1, inss, dels, r) - brk
                 b_diag_col = a_to_b_col(a_row-1, a_col-1, inss, dels, r)
-                ref_idx = a_col - dels[brk] - 1
+                ref_idx = a_col - 1
                 seq_idx = a_row - 1
 
                 # skip cells out of range of this chunk of original "A" matrix
@@ -479,17 +496,17 @@ cpdef align(char[::1] full_ref, char[::1] seq, str cigar,
 
                 # get n-polymer info
                 if a_col >= a_cols - 1:
-                    l = l_idx = n = 0
+                    l = np.zeros(max_np, dtype=np.intc)
+                    l_idx = np.zeros(max_np, dtype=np.intc)
                 else:
-                    l = np_info[L, ref_idx+1]
-                    l_idx = np_info[L_IDX, ref_idx+1]
-                    n = np_info[N, ref_idx+1]
+                    l = np_info[ref_idx+1, L, :]
+                    l_idx = np_info[ref_idx+1, L_IDX, :]
                 if a_row >= a_rows - 1:
-                    l_seq = l_idx_seq = n_seq = 0
+                    l_seq = np.zeros(max_np, dtype=np.intc)
+                    l_idx_seq = np.zeros(max_np, dtype=np.intc)
                 else:
-                    l_seq = np_info_seq[L, seq_idx+1]
-                    l_idx_seq = np_info_seq[L_IDX, seq_idx+1]
-                    n_seq = np_info_seq[N, seq_idx+1]
+                    l_seq = np_info_seq[seq_idx+1, L, :]
+                    l_idx_seq = np_info_seq[seq_idx+1, L_IDX, :]
 
 
                 # UPDATE INS MATRIX
@@ -570,17 +587,19 @@ cpdef align(char[::1] full_ref, char[::1] seq, str cigar,
                     matrix[LEN, b_row, b_col, RUN] = a_col - dels[brk]
 
                 # start insertion
-                b_ndown_row = a_to_b_row(a_row+n, a_col, inss, dels, r) - brk
-                b_ndown_col = a_to_b_col(a_row+n, a_col, inss, dels, r)
-                if a_row+n <= inss[next_brk] and b_ndown_col > 0: # np stays in chunk
-
-                    # only allow np insertions at starts, nps must match
-                    if n > 0 and l_idx == 0 and n_seq == n and \
+                for n in range(1,max_np+1):
+                    n_idx = n - 1
+                    if l[n_idx] == 0 or l_seq[n_idx] == 0 or \
+                            l_idx[n_idx] != 0 or not \
                             match(seq[seq_idx+1:seq_idx+1+n], ref[ref_idx+1:ref_idx+1+n]):
+                        continue
+                    b_ndown_row = a_to_b_row(a_row+n, a_col, inss, dels, r) - brk
+                    b_ndown_col = a_to_b_col(a_row+n, a_col, inss, dels, r)
+                    if a_row+n <= inss[next_brk] and b_ndown_col > 0: # np stays in chunk
 
-                        if l_idx_seq == 0: # start insertion
+                        if l_idx_seq[n_idx] == 0: # start insertion
                             val1 = matrix[MAT, b_row, b_col, VAL] + \
-                                    np_score(n, l, 1, np_scores, max_np_len)
+                                    np_score(n, l[n_idx], 1, np_scores, max_np_len)
                             if val1 < matrix[LEN, b_ndown_row, b_ndown_col, VAL]:
                                 matrix[LEN, b_ndown_row, b_ndown_col, VAL] = val1
                                 matrix[LEN, b_ndown_row, b_ndown_col, TYP] = LEN
@@ -594,7 +613,7 @@ cpdef align(char[::1] full_ref, char[::1] seq, str cigar,
 
                             if run > 0 and a_row-run >= inss[brk] and b_runup_col < 2*r:
                                 val1 = matrix[MAT, b_runup_row, b_runup_col, VAL] + \
-                                    np_score(n, l, <int>(run/n)+1, np_scores, max_np_len)
+                                    np_score(n, l[n_idx], <int>(run/n)+1, np_scores, max_np_len)
                                 if val1 < matrix[LEN, b_ndown_row, b_ndown_col, VAL]:
                                     matrix[LEN, b_ndown_row, b_ndown_col, VAL] = val1
                                     matrix[LEN, b_ndown_row, b_ndown_col, TYP] = LEN
@@ -607,29 +626,32 @@ cpdef align(char[::1] full_ref, char[::1] seq, str cigar,
                     matrix[SHR, b_row, b_col, TYP] = INS
                     matrix[SHR, b_row, b_col, RUN] = a_row - inss[brk]
 
-                b_nright_row = a_to_b_row(a_row, a_col+n, inss, dels, r) - brk
-                b_nright_col = a_to_b_col(a_row, a_col+n, inss, dels, r)
-                if a_col+n <= dels[next_brk] and b_nright_col < 2*r: # np stays in chunk
-                    if n > 0 and l_idx == 0: # start deletion
-                        val1 = matrix[MAT, b_row, b_col, VAL] + \
-                            np_score(n, l, -1, np_scores, max_np_len)
-                        if val1 < matrix[SHR, b_nright_row, b_nright_col, VAL]:
-                            matrix[SHR, b_nright_row, b_nright_col, VAL] = val1
-                            matrix[SHR, b_nright_row, b_nright_col, TYP] = SHR
-                            matrix[SHR, b_nright_row, b_nright_col, RUN] = n
-
-                    elif n > 0: # continue deletion
-                        run = <int>(matrix[SHR, b_row, b_col, RUN])
-                        b_runleft_row = a_to_b_row(a_row, a_col-run, inss, dels, r) - brk
-                        b_runleft_col = a_to_b_col(a_row, a_col-run, inss, dels, r)
-
-                        if run > 0 and a_col-run >= dels[brk] and b_runleft_col > 0:
-                            val1 = matrix[MAT, b_runleft_row, b_runleft_col, VAL] + \
-                                np_score(n, l, <int>(-run/n)-1, np_scores, max_np_len)
+                for n in range(1, max_np+1):
+                    n_idx = n-1
+                    if l[n_idx] == 0: continue
+                    b_nright_row = a_to_b_row(a_row, a_col+n, inss, dels, r) - brk
+                    b_nright_col = a_to_b_col(a_row, a_col+n, inss, dels, r)
+                    if a_col+n <= dels[next_brk] and b_nright_col < 2*r: # np stays in chunk
+                        if l_idx[n_idx] == 0: # start deletion
+                            val1 = matrix[MAT, b_row, b_col, VAL] + \
+                                np_score(n, l[n_idx], -1, np_scores, max_np_len)
                             if val1 < matrix[SHR, b_nright_row, b_nright_col, VAL]:
                                 matrix[SHR, b_nright_row, b_nright_col, VAL] = val1
                                 matrix[SHR, b_nright_row, b_nright_col, TYP] = SHR
-                                matrix[SHR, b_nright_row, b_nright_col, RUN] = run + n
+                                matrix[SHR, b_nright_row, b_nright_col, RUN] = n
+
+                        else: # continue deletion
+                            run = <int>(matrix[SHR, b_row, b_col, RUN])
+                            b_runleft_row = a_to_b_row(a_row, a_col-run, inss, dels, r) - brk
+                            b_runleft_col = a_to_b_col(a_row, a_col-run, inss, dels, r)
+
+                            if run > 0 and a_col-run >= dels[brk] and b_runleft_col > 0:
+                                val1 = matrix[MAT, b_runleft_row, b_runleft_col, VAL] + \
+                                    np_score(n, l[n_idx], <int>(-run/n)-1, np_scores, max_np_len)
+                                if val1 < matrix[SHR, b_nright_row, b_nright_col, VAL]:
+                                    matrix[SHR, b_nright_row, b_nright_col, VAL] = val1
+                                    matrix[SHR, b_nright_row, b_nright_col, TYP] = SHR
+                                    matrix[SHR, b_nright_row, b_nright_col, RUN] = run + n
 
 
         # initialize backtracking from last cell
@@ -694,7 +716,7 @@ cpdef align(char[::1] full_ref, char[::1] seq, str cigar,
                 while i < run:
                     a_row -= 1
                     a_col -= 1
-                    if ref[a_col-dels[brk]] == seq[a_row]:
+                    if ref[a_col] == seq[a_row]:
                         op += '='
                     else:
                         op += 'X'
@@ -712,16 +734,15 @@ cpdef align(char[::1] full_ref, char[::1] seq, str cigar,
             ops = 'MILDS'
             bases = 'NACGT'
 
-            print("REF:")
-            print_np_info(ref)
-            print("SEQ:")
-            print_np_info(seq)
-
             # PRINT A
             for typ, name in enumerate(types):
-                print(f'\nA: {name}, chunk {brk_idx}')
+                print(f'\nA: {name}, chunk {brk_idx} ({brk}, {next_brk})')
                 s = '    ~'
-                for base in ref:
+
+                end_idx = dels[next_brk]
+                if dels[next_brk] > int(len(dels)):
+                    end_idx += 1
+                for base in ref[dels[brk] : end_idx]:
                     s += '        ' + bases[base]
                 print(s)
 
@@ -813,25 +834,22 @@ def print_np_info(char[::1] seq):
     ''' Print sequence n-polymer annotations. '''
 
     np_info = get_np_info(seq)
-    L, L_IDX, N = 0, 1, 2
+    L, L_IDX = 0, 1
 
     print('bases: ', end='')
     for c in seq:
         print(f'{"NACGT"[c]} ', end='')
     print('')
 
-    print('l:     ', end='')
-    for l in np_info[L]:
-        print(f'{l} ', end='')
-    print('')
+    for n in range(1, cfg.args.max_np+1):
+        n_idx = n-1
+        print(f'n={n} l: ', end='')
+        for l in np_info[:, L, n_idx]:
+            print(f'{l} ', end='')
+        print('')
 
-    print('l_idx: ', end='')
-    for l_idx in np_info[L_IDX]:
-        print(f'{l_idx} ', end='')
-    print('')
-
-    print('n:     ', end='')
-    for n in np_info[N]:
-        print(f'{n} ', end='')
-    print('')
+        print('l_idx: ', end='')
+        for l_idx in np_info[:, L_IDX, n_idx]:
+            print(f'{l_idx} ', end='')
+        print('')
     print('')
