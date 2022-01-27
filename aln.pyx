@@ -64,10 +64,10 @@ def calc_score_matrices(subs, nps, inss, dels, eps=0.01):
 
     # calculate homopolymer scores matrix
     np_scores = np.zeros_like(nps, dtype=np.float32)
-    for n in range(cfg.args.max_np):
-        for ref_len in range(cfg.args.max_np_len):
+    for n in range(cfg.args.max_n):
+        for ref_len in range(cfg.args.max_l):
             total = np.sum(nps[n, ref_len])
-            for call_len in range(cfg.args.max_np_len):
+            for call_len in range(cfg.args.max_l):
                 count = int(nps[n, ref_len, call_len])
                 frac = (count + eps) / (total + eps)
                 np_scores[n, ref_len, call_len] = -np.log(frac)
@@ -85,13 +85,13 @@ def calc_score_matrices(subs, nps, inss, dels, eps=0.01):
 
     ins_scores = np.zeros_like(inss, dtype=np.float32)
     total = np.sum(inss)
-    for l in range(cfg.args.max_np_len):
+    for l in range(cfg.args.max_l):
         frac = (inss[l] + eps) / (total + eps)
         ins_scores[l] = -np.log(frac)
 
     del_scores = np.zeros_like(dels, dtype=np.float32)
     total = np.sum(dels)
-    for l in range(cfg.args.max_np_len):
+    for l in range(cfg.args.max_l):
         frac = (dels[l] + eps) / (total + eps)
         del_scores[l] = -np.log(frac)
 
@@ -99,8 +99,8 @@ def calc_score_matrices(subs, nps, inss, dels, eps=0.01):
 
 
 
-def plot_np_score_matrices(nps, max_np_len = 50):
-    for n in range(cfg.args.max_np):
+def plot_np_score_matrices(nps, max_l = 50):
+    for n in range(cfg.args.max_n):
 
         # score matrix
         med_np_len = 20
@@ -119,15 +119,15 @@ def plot_np_score_matrices(nps, max_np_len = 50):
         plt.close()
 
         # surface plot
-        x, y = np.meshgrid(range(max_np_len), range(3,max_np_len))
+        x, y = np.meshgrid(range(max_l), range(3,max_l))
         fig = plt.figure(figsize=(20,10))
         ax1 = fig.add_subplot(1,2,1, projection='3d')
         ax2 = fig.add_subplot(1,2,2, projection='3d')
         ax1.plot_trisurf(x.flatten(), -y.flatten(), 
-                nps[n,3:max_np_len,:max_np_len].flatten(), 
+                nps[n,3:max_l,:max_l].flatten(), 
                 cmap='RdYlGn_r', edgecolor='none')
         ax2.plot_trisurf(-x.flatten(), -y.flatten(), 
-                nps[n,3:max_np_len,:max_np_len].flatten(), 
+                nps[n,3:max_l,:max_l].flatten(), 
                 cmap='RdYlGn_r', edgecolor='none')
         plt.tight_layout()
         plt.savefig(f'{cfg.args.stats_dir}/{n+1}-polymer_scores_surface.png', dpi=200)
@@ -167,7 +167,7 @@ def plot_np_score_matrices(nps, max_np_len = 50):
 
         # contour plot
         fig = plt.figure(figsize=(20,20))
-        plt.contour(x, y, nps[n, 3:max_np_len, :max_np_len], 
+        plt.contour(x, y, nps[n, 3:max_l, :max_l], 
                 levels=list(range(20)), cmap='RdYlGn_r')
         plt.tight_layout()
         plt.savefig(f'{cfg.args.stats_dir}/{n+1}-polymer_scores_contour.png', dpi=200)
@@ -206,7 +206,7 @@ cpdef int[:,:,::1] get_np_info(char[::1] seq):
     '''
 
     cdef int seq_len = len(seq)
-    np_info_buf = np.zeros((seq_len, 2, cfg.args.max_np), dtype=np.intc)
+    np_info_buf = np.zeros((seq_len, 2, cfg.args.max_n), dtype=np.intc)
     cdef int[:,:,::1] np_info = np_info_buf
     cdef int n, l, pos, l_idx, n2, longest
     cdef int seq_idx, seq_ptr
@@ -217,7 +217,7 @@ cpdef int[:,:,::1] get_np_info(char[::1] seq):
 
     for seq_idx in range(seq_len): # iterate over sequence
 
-        for n in range(1, cfg.args.max_np+1): # check each length N-polymer
+        for n in range(1, cfg.args.max_n+1): # check each length N-polymer
             n_idx = n-1
 
             # get np repeat length at this position
@@ -250,22 +250,22 @@ cpdef int[:,:,::1] get_np_info(char[::1] seq):
 
 @cython.boundscheck(False)
 @cython.wraparound(False)
-cdef float np_score(int n, int ref_np_len, int indel_len, float[:,:,::1] np_scores, int max_np):
+cdef float np_score(int n, int ref_np_len, int indel_len, float[:,:,::1] np_scores, int max_n):
 
     # error, don't allow
     if ref_np_len <= 0:
         return 100
     elif ref_np_len + indel_len < 0:
         return 100
-    elif n < 1 or n > max_np:
+    elif n < 1 or n > max_n:
         return 100
 
     # force lengths to fit in matrix
     cdef int call_np_len = ref_np_len + indel_len
-    if ref_np_len > max_np-1:
-        ref_np_len = max_np-1
-    if call_np_len > max_np-1:
-        call_np_len = max_np-1
+    if ref_np_len > max_n-1:
+        ref_np_len = max_n-1
+    if call_np_len > max_n-1:
+        call_np_len = max_n-1
 
     return np_scores[n-1, ref_np_len, call_np_len]
 
@@ -428,8 +428,8 @@ cpdef align(char[::1] ref, char[::1] seq, str cigar,
     cdef int b_ndown_row, b_ndown_col, b_nright_row, b_nright_col
     cdef int run, typ, i, brk, next_brk, brk_idx, n, n_seq, end_idx
     cdef int[::1] l, l_idx, l_seq, l_idx_seq
-    cdef int max_np_len = cfg.args.max_np_len
-    cdef int max_np = cfg.args.max_np
+    cdef int max_l = cfg.args.max_l
+    cdef int max_n = cfg.args.max_n
     cdef float val1, val2
 
     if verbose:
@@ -496,14 +496,14 @@ cpdef align(char[::1] ref, char[::1] seq, str cigar,
 
                 # get n-polymer info
                 if a_col >= a_cols - 1:
-                    l = np.zeros(max_np, dtype=np.intc)
-                    l_idx = np.zeros(max_np, dtype=np.intc)
+                    l = np.zeros(max_n, dtype=np.intc)
+                    l_idx = np.zeros(max_n, dtype=np.intc)
                 else:
                     l = np_info[ref_idx+1, L, :]
                     l_idx = np_info[ref_idx+1, L_IDX, :]
                 if a_row >= a_rows - 1:
-                    l_seq = np.zeros(max_np, dtype=np.intc)
-                    l_idx_seq = np.zeros(max_np, dtype=np.intc)
+                    l_seq = np.zeros(max_n, dtype=np.intc)
+                    l_idx_seq = np.zeros(max_n, dtype=np.intc)
                 else:
                     l_seq = np_info_seq[seq_idx+1, L, :]
                     l_idx_seq = np_info_seq[seq_idx+1, L_IDX, :]
@@ -587,7 +587,7 @@ cpdef align(char[::1] ref, char[::1] seq, str cigar,
                     matrix[LEN, b_row, b_col, RUN] = a_col - dels[brk]
 
                 # start insertion
-                for n in range(1,max_np+1):
+                for n in range(1,max_n+1):
                     n_idx = n - 1
                     if l[n_idx] == 0 or l_seq[n_idx] == 0 or \
                             l_idx[n_idx] != 0 or not \
@@ -599,7 +599,7 @@ cpdef align(char[::1] ref, char[::1] seq, str cigar,
 
                         if l_idx_seq[n_idx] == 0: # start insertion
                             val1 = matrix[MAT, b_row, b_col, VAL] + \
-                                    np_score(n, l[n_idx], 1, np_scores, max_np_len)
+                                    np_score(n, l[n_idx], 1, np_scores, max_l)
                             if val1 < matrix[LEN, b_ndown_row, b_ndown_col, VAL]:
                                 matrix[LEN, b_ndown_row, b_ndown_col, VAL] = val1
                                 matrix[LEN, b_ndown_row, b_ndown_col, TYP] = LEN
@@ -613,7 +613,7 @@ cpdef align(char[::1] ref, char[::1] seq, str cigar,
 
                             if run > 0 and a_row-run >= inss[brk] and b_runup_col < 2*r:
                                 val1 = matrix[MAT, b_runup_row, b_runup_col, VAL] + \
-                                    np_score(n, l[n_idx], <int>(run/n)+1, np_scores, max_np_len)
+                                    np_score(n, l[n_idx], <int>(run/n)+1, np_scores, max_l)
                                 if val1 < matrix[LEN, b_ndown_row, b_ndown_col, VAL]:
                                     matrix[LEN, b_ndown_row, b_ndown_col, VAL] = val1
                                     matrix[LEN, b_ndown_row, b_ndown_col, TYP] = LEN
@@ -626,7 +626,7 @@ cpdef align(char[::1] ref, char[::1] seq, str cigar,
                     matrix[SHR, b_row, b_col, TYP] = INS
                     matrix[SHR, b_row, b_col, RUN] = a_row - inss[brk]
 
-                for n in range(1, max_np+1):
+                for n in range(1, max_n+1):
                     n_idx = n-1
                     if l[n_idx] == 0: continue
                     b_nright_row = a_to_b_row(a_row, a_col+n, inss, dels, r) - brk
@@ -634,7 +634,7 @@ cpdef align(char[::1] ref, char[::1] seq, str cigar,
                     if a_col+n <= dels[next_brk] and b_nright_col < 2*r: # np stays in chunk
                         if l_idx[n_idx] == 0: # start deletion
                             val1 = matrix[MAT, b_row, b_col, VAL] + \
-                                np_score(n, l[n_idx], -1, np_scores, max_np_len)
+                                np_score(n, l[n_idx], -1, np_scores, max_l)
                             if val1 < matrix[SHR, b_nright_row, b_nright_col, VAL]:
                                 matrix[SHR, b_nright_row, b_nright_col, VAL] = val1
                                 matrix[SHR, b_nright_row, b_nright_col, TYP] = SHR
@@ -647,7 +647,7 @@ cpdef align(char[::1] ref, char[::1] seq, str cigar,
 
                             if run > 0 and a_col-run >= dels[brk] and b_runleft_col > 0:
                                 val1 = matrix[MAT, b_runleft_row, b_runleft_col, VAL] + \
-                                    np_score(n, l[n_idx], <int>(-run/n)-1, np_scores, max_np_len)
+                                    np_score(n, l[n_idx], <int>(-run/n)-1, np_scores, max_l)
                                 if val1 < matrix[SHR, b_nright_row, b_nright_col, VAL]:
                                     matrix[SHR, b_nright_row, b_nright_col, VAL] = val1
                                     matrix[SHR, b_nright_row, b_nright_col, TYP] = SHR
@@ -841,7 +841,7 @@ def print_np_info(char[::1] seq):
         print(f'{"NACGT"[c]} ', end='')
     print('')
 
-    for n in range(1, cfg.args.max_np+1):
+    for n in range(1, cfg.args.max_n+1):
         n_idx = n-1
         print(f'n={n} l: ', end='')
         for l in np_info[:, L, n_idx]:

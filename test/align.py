@@ -68,8 +68,8 @@ def argparser():
             add_help = False
     )
     parser.add_argument("--recalc_cms", action="store_true")
-    parser.add_argument("--max_np", type=int, default=6)
-    parser.add_argument("--max_np_len", type=int, default=100)
+    parser.add_argument("--max_n", type=int, default=6)
+    parser.add_argument("--max_l", type=int, default=100)
     parser.add_argument("--stats_dir", type=str, default="../stats")
     parser.add_argument("--indels_only", type=bool, default=True)
     return parser

@@ -213,22 +213,22 @@ def get_confusion_matrices():
 
 
 
-def plot_confusion_matrices(subs, nps, inss, dels, max_np_len = 10, eps=0.01):
+def plot_confusion_matrices(subs, nps, inss, dels, max_l = 10, eps=0.01):
     ''' Generate confusion matrix plots for each n-polymer, substitutions, 
         and INDELs.
     '''
 
     # plot homopolymer confusion matrices
-    for n in range(cfg.args.max_np):
-        fig, ax = plt.subplots(figsize=(max_np_len,max_np_len))
-        ax.matshow(nps[n,:max_np_len,:max_np_len] / \
-                (1 + np.sum(nps[n,:max_np_len,:max_np_len],axis=1)[:, np.newaxis]), 
+    for n in range(cfg.args.max_n):
+        fig, ax = plt.subplots(figsize=(max_l,max_l))
+        ax.matshow(nps[n,:max_l,:max_l] / \
+                (1 + np.sum(nps[n,:max_l,:max_l],axis=1)[:, np.newaxis]), 
                 cmap=plt.cm.Blues, alpha=0.5)
 
         # add labels
-        for i in range(max_np_len):
-            total = np.sum(nps[n, i, :max_np_len])
-            for j in range(max_np_len):
+        for i in range(max_l):
+            total = np.sum(nps[n, i, :max_l])
+            for j in range(max_l):
                 count = int(nps[n, i, j])
                 frac = (count + eps) / (total + eps)
                 ax.text(x=j, y=i, 
@@ -239,8 +239,8 @@ def plot_confusion_matrices(subs, nps, inss, dels, max_np_len = 10, eps=0.01):
         plt.ylabel('Actual')
         plt.xlabel('Predicted')
         plt.title(f'{n+1}-Polymer Confusion Matrix')
-        ax.set_xticks(range(max_np_len))
-        ax.set_yticks(range(max_np_len))
+        ax.set_xticks(range(max_l))
+        ax.set_yticks(range(max_l))
         plt.tight_layout()
         plt.savefig(f'{cfg.args.stats_dir}/{n+1}-polymer_cm.png', dpi=300)
         plt.close()
@@ -254,7 +254,7 @@ def plot_confusion_matrices(subs, nps, inss, dels, max_np_len = 10, eps=0.01):
         total = np.sum(subs[i])
         for j in range(cfg.nbases):
             count = int(subs[i,j])
-            frac = (count + 0.1 + int(i==j)*10) / (total + 10 + max_np_len*0.1)
+            frac = (count + 0.1 + int(i==j)*10) / (total + 10 + max_l*0.1)
             ax.text(x = j, y = i, 
                     s = f'{count}\n{frac*100:.1f}%\n{-np.log(frac):.2f}', 
                     va = 'center', ha = 'center')
@@ -272,22 +272,22 @@ def plot_confusion_matrices(subs, nps, inss, dels, max_np_len = 10, eps=0.01):
     plt.close()
 
 
-    fig, ax = plt.subplots(2, 1, figsize=(max_np_len,5))
-    ax[0].matshow(inss[np.newaxis,:max_np_len], cmap=plt.cm.Greens, alpha=0.5)
-    ax[1].matshow(dels[np.newaxis,:max_np_len], cmap=plt.cm.Reds, alpha=0.5)
+    fig, ax = plt.subplots(2, 1, figsize=(max_l,5))
+    ax[0].matshow(inss[np.newaxis,:max_l], cmap=plt.cm.Greens, alpha=0.5)
+    ax[1].matshow(dels[np.newaxis,:max_l], cmap=plt.cm.Reds, alpha=0.5)
 
     # add labels
     total = np.sum(inss)
-    for i in range(max_np_len):
+    for i in range(max_l):
         count = int(inss[i])
-        frac = (count + 0.1 + int(i == j)*10) / (total + 10 + max_np_len*0.1)
+        frac = (count + 0.1 + int(i == j)*10) / (total + 10 + max_l*0.1)
         ax[0].text(x=i, y=0, 
                 s=f'{count}\n{frac*100:.1f}%\n{-np.log(frac):.2f}', 
                 va='center', ha='center')
     total = np.sum(dels)
-    for i in range(max_np_len):
+    for i in range(max_l):
         count = int(dels[i])
-        frac = (count + 0.1 + int(i == j)*10) / (total + 10 + max_np_len*0.1)
+        frac = (count + 0.1 + int(i == j)*10) / (total + 10 + max_l*0.1)
         ax[1].text(x=i, y=0, 
                 s=f'{count}\n{frac*100:.1f}%\n{-np.log(frac):.2f}', 
                 va='center', ha='center')
@@ -295,8 +295,8 @@ def plot_confusion_matrices(subs, nps, inss, dels, max_np_len = 10, eps=0.01):
     # formatting
     ax[0].set_ylabel('INSs')
     ax[1].set_ylabel('DELs')
-    ax[0].set_xticks(range(max_np_len))
-    ax[1].set_xticks(range(max_np_len))
+    ax[0].set_xticks(range(max_l))
+    ax[1].set_xticks(range(max_l))
     ax[0].set_yticks([])
     ax[1].set_yticks([])
     plt.suptitle(f'INDEL Confusion Matrices')
@@ -311,9 +311,9 @@ def calc_confusion_matrices(range_tuple):
 
     # initialize results matrices
     subs = np.zeros((cfg.nbases, cfg.nbases))
-    nps = np.zeros((cfg.args.max_np, cfg.args.max_np_len, cfg.args.max_np_len))
-    inss = np.zeros((cfg.args.max_np_len))
-    dels = np.zeros((cfg.args.max_np_len))
+    nps = np.zeros((cfg.args.max_n, cfg.args.max_l, cfg.args.max_l))
+    inss = np.zeros((cfg.args.max_l))
+    dels = np.zeros((cfg.args.max_l))
 
     # check that BAM exists, initialize
     try:
@@ -396,13 +396,13 @@ def calc_confusion_matrices(range_tuple):
 
                 # update INS matrix, start of ins
                 if cigar == Cigar.I and cigar != prev_cigar:
-                    inss[min(count, cfg.args.max_np_len-1)] += 1
+                    inss[min(count, cfg.args.max_l-1)] += 1
                 else:
                     inss[0] += 1
 
                 # update DEL matrix, start of del
                 if cigar == Cigar.D and cigar != prev_cigar:
-                    dels[min(count, cfg.args.max_np_len-1)] += 1
+                    dels[min(count, cfg.args.max_l-1)] += 1
                 else:
                     dels[0] += 1
 
@@ -426,7 +426,7 @@ def calc_confusion_matrices(range_tuple):
                     else:
                         indel = 0
 
-                    if np_len < cfg.args.max_np_len and np_len+indel<cfg.args.max_np_len:
+                    if np_len < cfg.args.max_l and np_len+indel<cfg.args.max_l:
                         nps[n-1, np_len, np_len+indel] += 1
 
             # store previous action (to detect indels directly prior to HP)

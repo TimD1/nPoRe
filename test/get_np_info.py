@@ -44,7 +44,7 @@ def argparser():
             formatter_class = argparse.ArgumentDefaultsHelpFormatter,
             add_help = False
     )
-    parser.add_argument("--max_np", type=int, default=10)
+    parser.add_argument("--max_n", type=int, default=10)
     return parser
 
 

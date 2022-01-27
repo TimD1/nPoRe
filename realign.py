@@ -32,8 +32,8 @@ def argparser():
     parser.add_argument("--max_reads", type=int, default=0)
 
     # algorithm parameters
-    parser.add_argument("--max_np", type=int, default=6)
-    parser.add_argument("--max_np_len", type=int, default=100)
+    parser.add_argument("--max_n", type=int, default=6)
+    parser.add_argument("--max_l", type=int, default=100)
     parser.add_argument("--chunk_width", type=int, default=1000000)
 
     # path
