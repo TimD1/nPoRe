@@ -30,12 +30,13 @@ def main():
     # ref_rd_cigs.append(("AACAACAACAACAAAAA", "AACAACAACAAAAA", "10=3D4="))
     # ref_rd_cigs.append(("GCACAGCAGTC", "GCACAGTC", "1=2D2=1D5="))
     # ref_rd_cigs.append(("AAAAAAAA", "AAAAAA", "1=1D3=1D2="))
-    ref_rd_cigs.append(("CAAAGAAAGAAAG", "CAAAGAAAGAAG", "9=1D2="))
+    ref_rd_cigs.append(("CAAAGAAAGAAAG", "CAAAGAAAGAAG", "9=1D3="))
     ref_rd_cigs.append(("CAAAGAAAGAAAG", "CAAAGAAAAGAAAG", "5=1I8="))
     ref_rd_cigs.append(("CAAAGAAAGAAAG", "CAAAGAAAAG", "5=4D1I4="))
     ref_rd_cigs.append(("CAAAGAAAGAAAG", "CAAGAAAG", "1=5D7="))
     ref_rd_cigs.append(("CGAAAGAAAGAAAG", "CGAAGAAAG", "2=5D7="))
     ref_rd_cigs.append(("CGAAAGAAAGAAAC", "CGAAGAAAC", "2=5D7="))
+    # ref_rd_cigs.append(("ATATATATTTTTTAAAGCGCGC", "ATATATATTTTTTAAAGCGCGC", "22="))
 
     # load existing score mats
     subs, nps, inss, dels = get_confusion_matrices()
@@ -67,7 +68,7 @@ def argparser():
             add_help = False
     )
     parser.add_argument("--recalc_cms", action="store_true")
-    parser.add_argument("--max_np", type=int, default=10)
+    parser.add_argument("--max_np", type=int, default=6)
     parser.add_argument("--max_np_len", type=int, default=100)
     parser.add_argument("--stats_dir", type=str, default="../stats")
     parser.add_argument("--indels_only", type=bool, default=True)
