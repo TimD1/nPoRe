@@ -7,7 +7,7 @@ parentdir = os.path.dirname(currentdir)
 sys.path.append(parentdir)
 
 from aln import align, calc_score_matrices, dump
-from cig import expand_cigar, standardize_cigar
+from cig import expand_cigar
 import cfg as cfg
 from bam import get_confusion_matrices
 
@@ -17,19 +17,25 @@ def main():
 
     # create test cases
     ref_rd_cigs = []
-    ref_rd_cigs.append(("ACCAGGCAT", "ACCAGGCAT", "9="))
-    ref_rd_cigs.append(("ACCAGGCAT", "ACAGGCA", "2=1D5=1D"))
-    ref_rd_cigs.append(("ACCAGGCAT", "ACCCAGGAT", "1=1I5=1D2="))
-    ref_rd_cigs.append(("AAAACCAGGCA", "AAACCAGGCA", "1D10="))
-    ref_rd_cigs.append(("TAAACCAGGCA", "AAACCAGGCA", "1D10="))
-    ref_rd_cigs.append(("AAAACCAGGCA", "AAAAACCAGGCA", "1I11="))
-    ref_rd_cigs.append(("AAAACCAGGCA", "TAAAACCAGGCA", "1I11="))
-    ref_rd_cigs.append(("CCAAAAAATTTTTCC", "CCAAAAATTTTTTCC", "7=1X7="))
-    ref_rd_cigs.append(("CACACACATATATATAGG", "CACACACATATATAGG", "14=2D2="))
-    ref_rd_cigs.append(("CACACACATATATATAGG", "CACACACATATATATATAGG", "16=2I2="))
-    ref_rd_cigs.append(("AACAACAACAACAAAAA", "AACAACAACAAAAA", "10=3D4="))
-    ref_rd_cigs.append(("GCACAGCAGTC", "GCACAGTC", "1=2D2=1D5="))
-    ref_rd_cigs.append(("AAAAAAAA", "AAAAAA", "1=1D3=1D2="))
+    # ref_rd_cigs.append(("ACCAGGCAT", "ACCAGGCAT", "9="))
+    # ref_rd_cigs.append(("ACCAGGCAT", "ACAGGCA", "2=1D5=1D"))
+    # ref_rd_cigs.append(("ACCAGGCAT", "ACCCAGGAT", "1=1I5=1D2="))
+    # ref_rd_cigs.append(("AAAACCAGGCA", "AAACCAGGCA", "1D10="))
+    # ref_rd_cigs.append(("TAAACCAGGCA", "AAACCAGGCA", "1D10="))
+    # ref_rd_cigs.append(("AAAACCAGGCA", "AAAAACCAGGCA", "1I11="))
+    # ref_rd_cigs.append(("AAAACCAGGCA", "TAAAACCAGGCA", "1I11="))
+    # ref_rd_cigs.append(("CCAAAAAATTTTTCC", "CCAAAAATTTTTTCC", "7=1X7="))
+    # ref_rd_cigs.append(("CACACACATATATATAGG", "CACACACATATATAGG", "14=2D2="))
+    # ref_rd_cigs.append(("CACACACATATATATAGG", "CACACACATATATATATAGG", "16=2I2="))
+    # ref_rd_cigs.append(("AACAACAACAACAAAAA", "AACAACAACAAAAA", "10=3D4="))
+    # ref_rd_cigs.append(("GCACAGCAGTC", "GCACAGTC", "1=2D2=1D5="))
+    # ref_rd_cigs.append(("AAAAAAAA", "AAAAAA", "1=1D3=1D2="))
+    ref_rd_cigs.append(("CAAAGAAAGAAAG", "CAAAGAAAGAAG", "9=1D2="))
+    ref_rd_cigs.append(("CAAAGAAAGAAAG", "CAAAGAAAAGAAAG", "5=1I8="))
+    ref_rd_cigs.append(("CAAAGAAAGAAAG", "CAAAGAAAAG", "5=4D1I4="))
+    ref_rd_cigs.append(("CAAAGAAAGAAAG", "CAAGAAAG", "1=5D7="))
+    ref_rd_cigs.append(("CGAAAGAAAGAAAG", "CGAAGAAAG", "2=5D7="))
+    ref_rd_cigs.append(("CGAAAGAAAGAAAC", "CGAAGAAAC", "2=5D7="))
 
     # load existing score mats
     subs, nps, inss, dels = get_confusion_matrices()
@@ -48,16 +54,10 @@ def main():
         for i in range(len(seq)): 
             int_seq[i] = cfg.base_dict[seq[i]]
 
-        new_cigar = align(int_ref, int_seq, cigar, sub_scores, np_scores, r=10)
+        print("-"*80)
+        new_cigar = align(int_ref, int_seq, cigar, sub_scores, np_scores, verbose=True, r=10)
         print(f"Cigar: {cigar}")
         dump(ref, seq, new_cigar)
-
-        # read_data = ("read_id", "ref", 0, 0, cigar, "", ref, "", seq, 0)
-        # read_id, ref_name, start, stop, new_cigar, hap_cigar, \
-        #         ref, hap_ref, seq, hap = standardize_cigar(read_data)
-
-        # print(f"\nCigar: {cigar}")
-        # dump(ref, seq, new_cigar)
 
 
 
