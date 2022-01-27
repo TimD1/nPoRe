@@ -213,7 +213,7 @@ def get_confusion_matrices():
 
 
 
-def plot_confusion_matrices(subs, nps, inss, dels, max_np_len = 20):
+def plot_confusion_matrices(subs, nps, inss, dels, max_np_len = 10, eps=0.01):
     ''' Generate confusion matrix plots for each n-polymer, substitutions, 
         and INDELs.
     '''
@@ -230,7 +230,7 @@ def plot_confusion_matrices(subs, nps, inss, dels, max_np_len = 20):
             total = np.sum(nps[n, i, :max_np_len])
             for j in range(max_np_len):
                 count = int(nps[n, i, j])
-                frac = (count + 0.1 + int(i == j)*10) / (total + 10 + max_np_len*0.1)
+                frac = (count + eps) / (total + eps)
                 ax.text(x=j, y=i, 
                         s=f'{count}\n{frac*100:.1f}%\n{-np.log(frac):.2f}', 
                         va='center', ha='center')
