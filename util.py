@@ -4,8 +4,8 @@ import pysam
 import cfg
 
 
-def get_fasta(reference, contig):
-    return str(SeqIO.to_dict(SeqIO.parse(reference, "fasta"))[contig].seq[:])
+def get_fasta(reference, contig, start=None, end=None):
+    return str(SeqIO.to_dict(SeqIO.parse(reference, "fasta"))[contig].seq[start:end])
 
 
 def count_chunks(regions):

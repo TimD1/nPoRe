@@ -210,6 +210,7 @@ cpdef int[:,:,::1] get_np_info(char[::1] seq):
     cdef int[:,:,::1] np_info = np_info_buf
     cdef int n, l, pos, l_idx, n2, longest
     cdef int seq_idx, seq_ptr
+    cdef int max_l = cfg.args.max_l
 
     # define constant values for indexing into `np_info` array
     cdef int L = 0
@@ -241,7 +242,7 @@ cpdef int[:,:,::1] get_np_info(char[::1] seq):
                 for l_idx in range(l):
                     pos = seq_idx + l_idx*n
                     if longest and l > np_info[pos, L, n_idx]:
-                        np_info[pos, L, n_idx] = l
+                        np_info[pos, L, n_idx] = min(max_l, l)
                         np_info[pos, L_IDX, n_idx] = l_idx
 
     return np_info
