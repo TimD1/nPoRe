@@ -55,6 +55,13 @@ def main():
     print("> selecting BAM regions")
     get_bam_regions()
 
+    if cfg.args.recalc_cms:
+        print("> reading reference")
+        cfg.args.refs = {}
+        for ctg, _, _ in cfg.args.regions:
+            if ctg not in cfg.args.refs.keys():
+                cfg.args.refs[ctg] = get_fasta(cfg.args.ref, ctg)
+
     # loading confusion matrices
     os.makedirs(cfg.args.stats_dir, exist_ok=True)
     subs, nps, inss, dels = get_confusion_matrices()
@@ -62,7 +69,7 @@ def main():
     print("> calculating score matrices")
     cfg.args.sub_scores, cfg.args.np_scores, cfg.args.ins_scores, cfg.args.del_scores = \
             calc_score_matrices(subs, nps, inss, dels)
-
+    
     if cfg.args.plot:
         print("> plotting confusion matrices")
         plot_confusion_matrices(subs, nps, inss, dels)

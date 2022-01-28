@@ -1,5 +1,5 @@
 import multiprocessing as mp
-import os, re, itertools, sys, gc, psutil
+import os, re, itertools, sys, gc, psutil, io, subprocess
 from bisect import bisect_left, bisect_right
 from time import perf_counter
 
@@ -159,7 +159,8 @@ def get_ranges(regions):
     stops = []
     for contig, start, stop in regions:
         contig_starts = list(range(start, stop, cfg.args.chunk_width))
-        contig_stops = [ min(stop, st + cfg.args.chunk_width) for st in starts ]
+        contig_stops = [ min(stop, st + cfg.args.chunk_width) 
+                for st in contig_starts ]
         starts.extend(contig_starts)
         stops.extend(contig_stops)
         contigs.extend([contig]*len(contig_starts))
@@ -187,7 +188,7 @@ def get_confusion_matrices():
     else:
         print("> calculating confusion matrices")
         num_chunks = count_chunks(cfg.args.regions)
-        print(f"0 of {num_chunks} chunks processed", end='', flush=True)
+        print(f"    0 of {num_chunks} chunks processed", end='', flush=True)
         ranges = get_ranges(cfg.args.regions)
         with mp.Pool() as pool: # multi-threaded
             results = list(pool.map(calc_confusion_matrices, ranges))
@@ -207,7 +208,7 @@ def get_confusion_matrices():
         np.save(f'{cfg.args.stats_dir}/dels_cm', dels)
 
         if cfg.args.recalc_exit:
-            exit(1)
+            exit(0)
 
         return subs, nps, inss, dels
 
@@ -306,156 +307,161 @@ def plot_confusion_matrices(subs, nps, inss, dels, max_l = 10, eps=0.01):
 
 
 
+def get_pileups(bam, ctg, start, end):
+
+    # get samtools mpileup
+    pileups = subprocess.Popen(["samtools", "mpileup", 
+        "-r", f'{ctg}:{start+1}-{end}', bam],
+        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        # bufsize=1, universal_newlines=True,
+
+    # return iterator
+    while True:
+        reads = pileups.stdout.readline()
+        if not reads: 
+            break
+        yield reads.split()[4].decode('utf-8').upper().strip()
+
+
+
 def calc_confusion_matrices(range_tuple):
     ''' Measure basecaller SUB/INDEL error profile. '''
 
     # initialize results matrices
     subs = np.zeros((cfg.nbases, cfg.nbases))
-    nps = np.zeros((cfg.args.max_n, cfg.args.max_l, cfg.args.max_l))
-    inss = np.zeros((cfg.args.max_l))
-    dels = np.zeros((cfg.args.max_l))
-
-    # check that BAM exists, initialize
-    try:
-        bam = pysam.AlignmentFile(cfg.args.bam, 'rb')
-    except FileNotFoundError:
-        print(f"\nERROR: BAM file '{cfg.args.bam}' not found.")
-        exit(1)
-
-    # iterate over all reference positions
+    nps = np.zeros((cfg.args.max_n, cfg.args.max_l+1, cfg.args.max_l+1))
+    inss = np.zeros((cfg.args.max_l+1))
+    dels = np.zeros((cfg.args.max_l+1))
     num_chunks = count_chunks(cfg.args.regions)
-    contig, window_start, window_end = range_tuple
-    for read in bam.fetch(contig, window_start, window_end):
 
-        # get reference, precalculate n-polymer stats
-        try:
-            # ref = reference[read_start:window_end]
-            ref = read.get_reference_sequence().upper() \
-                    [max(0, window_start-read.reference_start) : 
-                            window_end-read.reference_start]
-        except TypeError: 
-            # throwing error due to NoneType, checking for None fails...
-            continue
-        int_ref = np.zeros(len(ref), dtype=np.uint8)
-        for i in range(len(ref)): 
-            int_ref[i] = cfg.base_dict[ref[i]]
+    # get reference FASTA
+    ctg, start, end = range_tuple
+    pileups = get_pileups(cfg.args.bam, ctg, start, end)
 
-        np_info = get_np_info(int_ref)
-        RPTS = 0
-        RPT = 1
-        N = 2
-        IDX = 3
+    # calculate n-polymer info for region
+    np_info = get_np_info(bases_to_int(cfg.args.refs[ctg][start:end+1]))
+    L, L_IDX = 0, 1
 
-        # find read substring overlapping region
-        cigar_types = [ c[0] for c in read.cigartuples ]
-        cigar_counts = [ c[1] for c in read.cigartuples ]
-        read_idx, ref_idx = 0, read.reference_start
-        read_start = max(read.reference_start, window_start)
-        prev_cigar = None
-        prev_count = 0
+    # calculate confusion matrices
+    for pos, ref_base, reads in zip(range(end-start), 
+            cfg.args.refs[ctg][start:end], pileups):
+        was_del = was_ins = True
 
-        # walk along reference, keeping stats
-        while ref_idx < window_end and ref_idx < read.reference_end:
+        i = 0
+        while i < len(reads):
+            c = reads[i]
 
-            read_move, ref_move = None, None
-            cigar = cigar_types[0]
-            count = cigar_counts[0]
+            if c == '^': # ignore start char and mapping quality
+                i += 2
 
-            # determine whether to move on read/ref
-            if cigar == Cigar.S:    # soft-clipped
-                read_move = True
-                ref_move = False
-            elif cigar == Cigar.H:    # hard-clipped
-                read_move = False
-                ref_move = False
-            elif cigar == Cigar.X:    # substitution
-                read_move = True
-                ref_move = True
-            elif cigar == Cigar.I:    # insertion
-                read_move = True
-                ref_move = False
-            elif cigar == Cigar.D:    # deletion
-                read_move = False
-                ref_move = True
-            elif cigar == Cigar.E:    # match
-                read_move = True
-                ref_move = True
-            elif cigar == Cigar.M:    # match/sub
-                read_move = True
-                ref_move = True
-            else:
-                print(f"\nERROR: unexpected CIGAR type for {read.query_name}")
-                exit(1)
+            elif c == '$' or c == '*': # ignore end char and deletion
+                i += 1
 
-            if ref_idx > read_start and cigar != Cigar.S and cigar != Cigar.H:
+            elif c in 'NACGT':  # substitution
+                subs[ cfg.base_dict[ref_base], cfg.base_dict[c] ] += 1
+                i += 1
 
-                # update SUB matrix
-                if ref_move and read_move and ref[ref_idx-read_start] != 'N':
-                    subs[ cfg.base_dict[ref[ref_idx-read_start]], 
-                          cfg.base_dict[read.query_sequence[read_idx]]] += 1
-
-                # update INS matrix, start of ins
-                if cigar == Cigar.I and cigar != prev_cigar:
-                    inss[min(count, cfg.args.max_l-1)] += 1
-                else:
+                # record absence of insertions/deletions
+                if not was_ins:
                     inss[0] += 1
-
-                # update DEL matrix, start of del
-                if cigar == Cigar.D and cigar != prev_cigar:
-                    dels[min(count, cfg.args.max_l-1)] += 1
-                else:
+                if not was_del:
                     dels[0] += 1
+                if not was_ins and not was_del:
+                    for n in range(1, cfg.args.max_n+1):
+                        n_idx = n - 1
+                        l = np_info[pos+1, L, n_idx]
+                        l_idx = np_info[pos+1, L_IDX, n_idx]
+                        if l != 0 and l_idx == 0:
+                            nps[n_idx, l, l] += 1
+                was_ins = was_del = False
 
-                n = np_info[N, ref_idx-read_start]
-                np_len = np_info[RPTS, ref_idx-read_start]
-                idx = np_info[IDX, ref_idx-read_start]
-                rpt = np_info[RPT, ref_idx-read_start]
-                prev_n = np_info[N, ref_idx-read_start-1]
-                prev_np_len = np_info[RPTS, ref_idx-read_start-1]
+            elif c == '-': # deletion
+                was_del = True
+                
+                # get deletion length
+                indel = 0
+                i += 1
+                c = reads[i]
+                while c in '0123456789':
+                    indel += int(c)
+                    indel *= 10
+                    i += 1
+                    c = reads[i]
+                indel //= 10
 
-                # update N-POLYMER matrix, start of np
-                if n > 0 and rpt == 0 and idx == 0:
+                # determine if n-polymer deletion
+                cnv = False
+                for n in range(1, cfg.args.max_n+1):
+                    n_idx = n-1
+                    l = np_info[pos+1, L, n_idx]
+                    l_idx = np_info[pos+1, L_IDX, n_idx]
+                    if l != 0 and l_idx == 0 and indel % n == 0 and indel <= l*n:
+                        cnv = True
+                        nps[n_idx, l, l - indel//n] += 1
 
-                    if prev_cigar == Cigar.I and prev_count % n == 0:
-                        if read.query_sequence[read_idx-prev_count:read_idx] == \
-                                ref[ref_idx-read_start:ref_idx-read_start+n] * \
-                                int(prev_count/n):
-                            indel = int(prev_count / n)
-                    elif cigar == Cigar.D and count % n == 0:
-                        indel = - int(min(np_len, count / n))
-                    else:
-                        indel = 0
+                    elif l != 0 and l_idx == 0:
+                        nps[n_idx, l, l] += 1
 
-                    if np_len < cfg.args.max_l and np_len+indel<cfg.args.max_l:
-                        nps[n-1, np_len, np_len+indel] += 1
+                # if not, count as general deletion
+                if not cnv:
+                    dels[min(cfg.args.max_l,indel)] += 1
+                i += indel
 
-            # store previous action (to detect indels directly prior to HP)
-            if cigar != prev_cigar:
-                prev_cigar = cigar
-                prev_count = count
+            elif c == '+': # insertion
+                was_ins = True
 
-            # shift reference index by one base or deleted section
-            if ref_move:
-                if read_move:
-                    ref_idx += 1
-                else:
-                    ref_idx += count
+                # get insertion length
+                indel = 0
+                i += 1
+                c = reads[i]
+                while c in '0123456789':
+                    indel += int(c)
+                    indel *= 10
+                    i += 1
+                    c = reads[i]
+                indel //= 10
 
-            # shift read index
-            if read_move:
-                cigar_counts[0] -= 1
-                read_idx += 1
+                # determine if n-polymer insertion
+                cnv = False
+                for n in range(1, cfg.args.max_n+1):
+                    n_idx = n-1
+                    l = np_info[pos+1, L, n_idx]
+                    l_idx = np_info[pos+1, L_IDX, n_idx]
+                    if l != 0 and l_idx == 0 and indel % n == 0 and \
+                            cfg.args.refs[ctg][start+pos+1:start+pos+n+1] * \
+                            (indel//n) == reads[i:i+indel]:
+                        cnv = True
+                        nps[n_idx, l, min(cfg.args.max_l, l + indel//n)] += 1
+
+                    elif l != 0 and l_idx == 0:
+                        nps[n_idx, l, l] += 1
+
+                # if not, count as general insertion
+                if not cnv:
+                    inss[min(cfg.args.max_l,indel)] += 1
+                i += indel
+
             else:
-                cigar_counts[0] = 0
+                print(f"ERROR: unexpected character '{c}'.")
+                print(f'{ctg}:{pos+start} [{ref_base}] {reads}')
+                break
 
-            # move to next CIGAR section of interest
-            if cigar_counts[0] == 0:
-                del cigar_counts[0]
-                del cigar_types[0]
+        # record absence of insertions/deletions for last read at pos
+        if not was_ins:
+            inss[0] += 1
+        if not was_del:
+            dels[0] += 1
+        if not was_ins and not was_del:
+            for n in range(1, cfg.args.max_n+1):
+                n_idx = n - 1
+                l = np_info[pos+1, L, n_idx]
+                l_idx = np_info[pos+1, L_IDX, n_idx]
+                if l != 0 and l_idx == 0:
+                    nps[n_idx, l, l] += 1
 
     with cfg.counter.get_lock():
         cfg.counter.value += 1
-        print(f"\r{cfg.counter.value} of {num_chunks} chunks processed.", 
+        print(f"\r    {cfg.counter.value} of {num_chunks} chunks processed.", 
                 end='', flush=True)
 
     return subs, nps, inss, dels
