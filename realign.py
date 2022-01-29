@@ -34,7 +34,7 @@ def argparser():
     # algorithm parameters
     parser.add_argument("--max_n", type=int, default=6)
     parser.add_argument("--max_l", type=int, default=100)
-    parser.add_argument("--chunk_width", type=int, default=1000000)
+    parser.add_argument("--chunk_width", type=int, default=100000)
 
     # path
     parser.add_argument("--stats_dir", default="./stats")

@@ -2,6 +2,7 @@ import multiprocessing as mp
 import os, re, itertools, sys, gc, psutil, io, subprocess
 from bisect import bisect_left, bisect_right
 from time import perf_counter
+import cython
 
 import pysam
 import numpy as np
@@ -313,26 +314,75 @@ def get_pileups(bam, ctg, start, end):
     pileups = subprocess.Popen(["samtools", "mpileup", 
         "-r", f'{ctg}:{start+1}-{end}', bam],
         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-        # bufsize=1, universal_newlines=True,
+    cut = subprocess.Popen(["cut", "-f5"], 
+            stdin=pileups.stdout, stdout=subprocess.PIPE)
 
     # return iterator
     while True:
-        reads = pileups.stdout.readline()
+        reads = cut.stdout.readline()
         if not reads: 
             break
-        yield reads.split()[4].decode('utf-8').upper().strip()
+        yield reads.decode('utf-8').upper().strip()
 
 
 
-def calc_confusion_matrices(range_tuple):
+@cython.boundscheck(False)
+@cython.wraparound(False)
+cdef char base_to_int(str base):
+    if base == 'N':
+        return 0
+    elif base == 'A':
+        return 1
+    elif base == 'C':
+        return 2
+    elif base == 'G':
+        return 3
+    elif base == 'T':
+        return 4
+    elif base == '-':
+        return 5
+
+
+
+@cython.boundscheck(False)
+@cython.wraparound(False)
+cpdef char[::1] str_to_chars(str seq):
+    cdef long long seqlen = len(seq)
+    chars_buf = np.zeros(seqlen, dtype=np.uint8)
+    cdef char[::1] chars = chars_buf
+    for i in range(seqlen):
+        chars[i] = <char>(seq[i] - char('\x00'))
+    return chars
+
+
+
+@cython.boundscheck(False)
+@cython.wraparound(False)
+@cython.cdivision(True)
+cpdef tuple calc_confusion_matrices(range_tuple):
     ''' Measure basecaller SUB/INDEL error profile. '''
 
+    cdef str ctg, reads, c
+    cdef long long start, end, pos
+    cdef int[:,:,::1] np_info
+    cdef char[::1] bases
+    cdef int L, L_IDX, i, num_chunks, l, l_idx, indel, n, n_idx
+    cdef char ref_base
+    cdef int max_n = cfg.args.max_n
+    cdef int max_l = cfg.args.max_l
+    cdef int nbases = cfg.nbases
+
     # initialize results matrices
-    subs = np.zeros((cfg.nbases, cfg.nbases))
-    nps = np.zeros((cfg.args.max_n, cfg.args.max_l+1, cfg.args.max_l+1))
-    inss = np.zeros((cfg.args.max_l+1))
-    dels = np.zeros((cfg.args.max_l+1))
+    subs_buf = np.zeros((nbases, nbases), dtype=np.longlong)
+    nps_buf = np.zeros((max_n, max_l+1, max_l+1), dtype=np.longlong)
+    inss_buf = np.zeros((max_l+1), dtype=np.longlong)
+    dels_buf = np.zeros((max_l+1), dtype=np.longlong)
     num_chunks = count_chunks(cfg.args.regions)
+
+    cdef long long[:,::1] subs = subs_buf
+    cdef long long[:,:,::1] nps = nps_buf
+    cdef long long[::1] inss = inss_buf
+    cdef long long[::1] dels = dels_buf
 
     # get reference FASTA
     ctg, start, end = range_tuple
@@ -343,9 +393,11 @@ def calc_confusion_matrices(range_tuple):
     L, L_IDX = 0, 1
 
     # calculate confusion matrices
-    for pos, ref_base, reads in zip(range(end-start), 
-            cfg.args.refs[ctg][start:end], pileups):
+    pos = 0
+    bases = bases_to_int(cfg.args.refs[ctg][start:end])
+    for reads in pileups:
         was_del = was_ins = True
+        ref_base = bases[pos]
 
         i = 0
         while i < len(reads):
@@ -357,8 +409,8 @@ def calc_confusion_matrices(range_tuple):
             elif c == '$' or c == '*': # ignore end char and deletion
                 i += 1
 
-            elif c in 'NACGT':  # substitution
-                subs[ cfg.base_dict[ref_base], cfg.base_dict[c] ] += 1
+            elif c in ['N', 'A', 'C', 'G', 'T']:  # substitution
+                subs[ ref_base, base_to_int(c) ] += 1
                 i += 1
 
                 # record absence of insertions/deletions
@@ -367,7 +419,7 @@ def calc_confusion_matrices(range_tuple):
                 if not was_del:
                     dels[0] += 1
                 if not was_ins and not was_del:
-                    for n in range(1, cfg.args.max_n+1):
+                    for n in range(1, max_n+1):
                         n_idx = n - 1
                         l = np_info[pos+1, L, n_idx]
                         l_idx = np_info[pos+1, L_IDX, n_idx]
@@ -382,7 +434,7 @@ def calc_confusion_matrices(range_tuple):
                 indel = 0
                 i += 1
                 c = reads[i]
-                while c in '0123456789':
+                while c in ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9']:
                     indel += int(c)
                     indel *= 10
                     i += 1
@@ -391,7 +443,7 @@ def calc_confusion_matrices(range_tuple):
 
                 # determine if n-polymer deletion
                 cnv = False
-                for n in range(1, cfg.args.max_n+1):
+                for n in range(1, max_n+1):
                     n_idx = n-1
                     l = np_info[pos+1, L, n_idx]
                     l_idx = np_info[pos+1, L_IDX, n_idx]
@@ -404,7 +456,7 @@ def calc_confusion_matrices(range_tuple):
 
                 # if not, count as general deletion
                 if not cnv:
-                    dels[min(cfg.args.max_l,indel)] += 1
+                    dels[min(max_l,indel)] += 1
                 i += indel
 
             elif c == '+': # insertion
@@ -414,7 +466,7 @@ def calc_confusion_matrices(range_tuple):
                 indel = 0
                 i += 1
                 c = reads[i]
-                while c in '0123456789':
+                while c in ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9']:
                     indel += int(c)
                     indel *= 10
                     i += 1
@@ -423,7 +475,7 @@ def calc_confusion_matrices(range_tuple):
 
                 # determine if n-polymer insertion
                 cnv = False
-                for n in range(1, cfg.args.max_n+1):
+                for n in range(1, max_n+1):
                     n_idx = n-1
                     l = np_info[pos+1, L, n_idx]
                     l_idx = np_info[pos+1, L_IDX, n_idx]
@@ -431,14 +483,14 @@ def calc_confusion_matrices(range_tuple):
                             cfg.args.refs[ctg][start+pos+1:start+pos+n+1] * \
                             (indel//n) == reads[i:i+indel]:
                         cnv = True
-                        nps[n_idx, l, min(cfg.args.max_l, l + indel//n)] += 1
+                        nps[n_idx, l, min(max_l, l + indel//n)] += 1
 
                     elif l != 0 and l_idx == 0:
                         nps[n_idx, l, l] += 1
 
                 # if not, count as general insertion
                 if not cnv:
-                    inss[min(cfg.args.max_l,indel)] += 1
+                    inss[min(max_l,indel)] += 1
                 i += indel
 
             else:
@@ -452,19 +504,21 @@ def calc_confusion_matrices(range_tuple):
         if not was_del:
             dels[0] += 1
         if not was_ins and not was_del:
-            for n in range(1, cfg.args.max_n+1):
+            for n in range(1, max_n+1):
                 n_idx = n - 1
                 l = np_info[pos+1, L, n_idx]
                 l_idx = np_info[pos+1, L_IDX, n_idx]
                 if l != 0 and l_idx == 0:
                     nps[n_idx, l, l] += 1
 
+        pos += 1
+
     with cfg.counter.get_lock():
         cfg.counter.value += 1
         print(f"\r    {cfg.counter.value} of {num_chunks} chunks processed.", 
                 end='', flush=True)
 
-    return subs, nps, inss, dels
+    return subs_buf, nps_buf, inss_buf, dels_buf
 
 
 
