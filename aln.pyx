@@ -206,11 +206,12 @@ cpdef int[:,:,::1] get_np_info(char[::1] seq):
     '''
 
     cdef int seq_len = len(seq)
-    np_info_buf = np.zeros((seq_len, 2, cfg.args.max_n), dtype=np.intc)
+    cdef int max_l = cfg.args.max_l
+    cdef int max_n = cfg.args.max_n
+    np_info_buf = np.zeros((seq_len, 2, max_n), dtype=np.intc)
     cdef int[:,:,::1] np_info = np_info_buf
     cdef int n, l, pos, l_idx, n2, longest
     cdef int seq_idx, seq_ptr
-    cdef int max_l = cfg.args.max_l
 
     # define constant values for indexing into `np_info` array
     cdef int L = 0
@@ -218,7 +219,7 @@ cpdef int[:,:,::1] get_np_info(char[::1] seq):
 
     for seq_idx in range(seq_len): # iterate over sequence
 
-        for n in range(1, cfg.args.max_n+1): # check each length N-polymer
+        for n in range(1, max_n+1): # check each length N-polymer
             n_idx = n-1
 
             # get np repeat length at this position
@@ -433,6 +434,9 @@ cpdef align(char[::1] ref, char[::1] seq, str cigar,
     cdef int max_n = cfg.args.max_n
     cdef float val1, val2
 
+    zeros_buf = np.zeros(max_n, dtype=np.intc)
+    cdef int[::1] zeros = zeros_buf
+
     if verbose:
         print("REF:")
         print_np_info(ref)
@@ -497,14 +501,14 @@ cpdef align(char[::1] ref, char[::1] seq, str cigar,
 
                 # get n-polymer info
                 if a_col >= a_cols - 1:
-                    l = np.zeros(max_n, dtype=np.intc)
-                    l_idx = np.zeros(max_n, dtype=np.intc)
+                    l = zeros_buf
+                    l_idx = zeros_buf
                 else:
                     l = np_info[ref_idx+1, L, :]
                     l_idx = np_info[ref_idx+1, L_IDX, :]
                 if a_row >= a_rows - 1:
-                    l_seq = np.zeros(max_n, dtype=np.intc)
-                    l_idx_seq = np.zeros(max_n, dtype=np.intc)
+                    l_seq = zeros_buf
+                    l_idx_seq = zeros_buf
                 else:
                     l_seq = np_info_seq[seq_idx+1, L, :]
                     l_idx_seq = np_info_seq[seq_idx+1, L_IDX, :]

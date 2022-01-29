@@ -207,11 +207,25 @@ def ref_len(cigar):
             length += 1
     return length
 
-
-def bases_to_int(seq):
-    int_seq = np.zeros(len(seq), dtype=np.uint8)
-    for i in range(len(seq)):
-        int_seq[i] = cfg.base_dict[ seq[i] ]
+@cython.boundscheck(False)
+@cython.wraparound(False)
+cpdef char[::1] bases_to_int(str seq):
+    cdef long long seqlen = len(seq)
+    int_seq_buf = np.zeros(seqlen, dtype=np.uint8)
+    cdef char[::1] int_seq = int_seq_buf
+    for i in range(seqlen):
+        if seq[i] == 'N':
+            int_seq[i] = 0
+        elif seq[i] == 'A':
+            int_seq[i] = 1
+        elif seq[i] == 'C':
+            int_seq[i] = 2
+        elif seq[i] == 'G':
+            int_seq[i] = 3
+        elif seq[i] == 'T':
+            int_seq[i] = 4
+        elif seq[i] == '-':
+            int_seq[i] = 5
     return int_seq
 
 def int_to_bases(int_seq):
