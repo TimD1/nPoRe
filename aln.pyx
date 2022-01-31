@@ -374,7 +374,7 @@ cdef int match(char[::1] A, char[::1] B):
 @cython.boundscheck(False)
 @cython.wraparound(False)
 @cython.cdivision(True)
-cpdef align(char[::1] ref, char[::1] seq, str cigar, 
+cpdef align(char[::1] full_ref, char[::1] full_seq, str cigar, 
         float[:,::1] sub_scores, float[:,:,::1] np_scores, 
         float indel_start=5, float indel_extend=1, int max_b_rows = 20000,
         int r = 30, int verbose=0):
@@ -386,12 +386,13 @@ cpdef align(char[::1] ref, char[::1] seq, str cigar,
     # precompute offsets, breakpoints, and homopolymers
     cdef int[::1] inss = get_inss(cigar)
     cdef int[::1] dels = get_dels(cigar)
-    cdef int[::1] breaks = get_breaks(max_b_rows, len(seq) + len(ref) + 1, inss, dels)
+    cdef int[::1] breaks = get_breaks(max_b_rows, 
+            len(full_seq) + len(full_ref) + 1, inss, dels)
     cdef int[:,:,::1] np_info, np_info_seq
 
     # define useful constants
-    cdef int a_rows = len(seq) + 1
-    cdef int a_cols = len(ref) + 1
+    cdef int a_rows = len(full_seq) + 1
+    cdef int a_cols = len(full_ref) + 1
     cdef int b_cols = 2*r + 1
     cdef int b_rows = -1
 
@@ -436,13 +437,7 @@ cpdef align(char[::1] ref, char[::1] seq, str cigar,
 
     zeros_buf = np.zeros(max_n, dtype=np.intc)
     cdef int[::1] zeros = zeros_buf
-
-    if verbose:
-        print("REF:")
-        print_np_info(ref)
-        print("SEQ:")
-        print_np_info(seq)
-
+    cdef char[::1] ref, seq
 
     # iterate over b matrix in chunks set by breakpoints
     for brk_idx in range(len(breaks)-1):
@@ -451,8 +446,18 @@ cpdef align(char[::1] ref, char[::1] seq, str cigar,
         next_brk = breaks[brk_idx+1]
         b_rows = next_brk - brk + 1
         matrix_buf.fill(0)
+
+        # only current chunk so np_info isn't too large
+        ref = full_ref[dels[brk] : dels[next_brk]+1]
+        seq = full_seq[inss[brk] : inss[next_brk]+1]
         np_info = get_np_info(ref)
         np_info_seq = get_np_info(seq)
+
+        if verbose:
+            print("REF:")
+            print_np_info(ref)
+            print("SEQ:")
+            print_np_info(seq)
 
         # initialize N-polymer matrices with invalid states
         for b_row in range(b_rows):
@@ -483,8 +488,8 @@ cpdef align(char[::1] ref, char[::1] seq, str cigar,
                 b_left_col = a_to_b_col(a_row, a_col-1, inss, dels, r)
                 b_diag_row = a_to_b_row(a_row-1, a_col-1, inss, dels, r) - brk
                 b_diag_col = a_to_b_col(a_row-1, a_col-1, inss, dels, r)
-                ref_idx = a_col - 1
-                seq_idx = a_row - 1
+                ref_idx = a_col - dels[brk] - 1
+                seq_idx = a_row - inss[brk] - 1
 
                 # skip cells out of range of this chunk of original "A" matrix
                 if a_row < inss[brk] or a_col < dels[brk] or \
@@ -596,7 +601,8 @@ cpdef align(char[::1] ref, char[::1] seq, str cigar,
                     n_idx = n - 1
                     if l[n_idx] == 0 or l_seq[n_idx] == 0 or \
                             l_idx[n_idx] != 0 or not \
-                            match(seq[seq_idx+1:seq_idx+1+n], ref[ref_idx+1:ref_idx+1+n]):
+                            match(seq[seq_idx+1:seq_idx+1+n], 
+                                    ref[ref_idx+1:ref_idx+1+n]):
                         continue
                     b_ndown_row = a_to_b_row(a_row+n, a_col, inss, dels, r) - brk
                     b_ndown_col = a_to_b_col(a_row+n, a_col, inss, dels, r)
@@ -721,7 +727,7 @@ cpdef align(char[::1] ref, char[::1] seq, str cigar,
                 while i < run:
                     a_row -= 1
                     a_col -= 1
-                    if ref[a_col] == seq[a_row]:
+                    if ref[a_col-dels[brk]] == seq[a_row-inss[brk]]:
                         op += '='
                     else:
                         op += 'X'
@@ -744,11 +750,8 @@ cpdef align(char[::1] ref, char[::1] seq, str cigar,
                 print(f'\nA: {name}, chunk {brk_idx} ({brk}, {next_brk})')
                 s = '    ~'
 
-                end_idx = dels[next_brk]
-                if dels[next_brk] > int(len(dels)):
-                    end_idx += 1
-                for base in ref[dels[brk] : end_idx]:
-                    s += '        ' + bases[base]
+                for a_col in range(dels[brk], dels[next_brk]):
+                    s += '        ' + bases[ref[a_col-dels[brk]]]
                 print(s)
 
                 for a_row in range(inss[brk], inss[next_brk]+1):
@@ -756,7 +759,7 @@ cpdef align(char[::1] ref, char[::1] seq, str cigar,
                     if a_row == inss[brk]:
                         s = '~'
                     else:
-                        s = bases[seq[a_row-1]]
+                        s = bases[seq[a_row-inss[brk]-1]]
 
                     for a_col in range(dels[brk], dels[next_brk]+1):
                         b_row = a_to_b_row(a_row, a_col, inss, dels, r) - brk

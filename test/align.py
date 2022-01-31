@@ -56,7 +56,8 @@ def main():
             int_seq[i] = cfg.base_dict[seq[i]]
 
         print("-"*80)
-        new_cigar = align(int_ref, int_seq, cigar, sub_scores, np_scores, verbose=True, r=10)
+        new_cigar = align(int_ref, int_seq, cigar, sub_scores, np_scores, 
+                verbose=True, max_b_rows=20, r=10)
         print(f"Cigar: {cigar}")
         dump(ref, seq, new_cigar)
 
