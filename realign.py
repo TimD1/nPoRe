@@ -43,7 +43,6 @@ def argparser():
     parser.add_argument("--plot", action="store_true")
     parser.add_argument("--recalc_cms", action="store_true")
     parser.add_argument("--recalc_exit", action="store_true")
-    parser.add_argument("--indel_cigar", action="store_true")
 
 
     return parser

@@ -72,7 +72,6 @@ def argparser():
     parser.add_argument("--max_n", type=int, default=6)
     parser.add_argument("--max_l", type=int, default=100)
     parser.add_argument("--stats_dir", type=str, default="../old_4stats")
-    parser.add_argument("--indels_only", type=bool, default=True)
     return parser
 
 

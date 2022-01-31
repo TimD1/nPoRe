@@ -67,7 +67,6 @@ def argparser():
     parser.add_argument("--max_l", type=int, default=100)
     parser.add_argument("--chunk_width", type=int, default=10000)
 
-    parser.add_argument("--indel_cigar", action="store_true")
     parser.add_argument("--min_qual", type=int, default=0)
     return parser
 
