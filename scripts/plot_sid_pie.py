@@ -119,49 +119,49 @@ def count(vcf_fn):
             if query_type != ".":
                 data.add(types[query_type[0]], query_call)
 
-        # get all actual (TP and FN) INDELS, test if CNV
-        if ref_type != ".":
+        # # get all actual (TP and FN) INDELS, test if CNV
+        # if ref_type != ".":
 
-            # ignore complex variants
-            if type(ref_type) != tuple and \
-                    len(set([x for x in ref_gt if x])) == 1 and \
-                    types[ref_type[0]] == "insertion":
-                ref = record.alleles[0]
-                alt = record.alleles[[x for x in ref_gt if x != 0][0]] # first non-ref alleles
-                pos = record.pos-1 + len(ref)
-                ins = alt[len(ref):]
-                refseq = cfg.args.refs[record.contig][pos:pos+20]
-                np_info = get_np_info(bases_to_int(refseq))
-                np_info_seq = get_np_info(bases_to_int(ins+refseq))
-                cnv = False
-                for n in range(1, cfg.args.max_n+1):
-                    n_idx = n-1
-                    if np_info[0, L, n_idx] and np_info_seq[0, L, n_idx]:
-                        if len(ins) % n == 0 and ins[:n] == refseq[:n]:
-                            data.cnvs[TRUE] += 1
-                            cnv = True
-                            break
-                if not cnv:
-                    data.cnvs[FALSE] += 1
+        #     # ignore complex variants
+        #     if type(ref_type) != tuple and \
+        #             len(set([x for x in ref_gt if x])) == 1 and \
+        #             types[ref_type[0]] == "insertion":
+        #         ref = record.alleles[0]
+        #         alt = record.alleles[[x for x in ref_gt if x != 0][0]] # first non-ref alleles
+        #         pos = record.pos-1 + len(ref)
+        #         ins = alt[len(ref):]
+        #         refseq = cfg.args.refs[record.contig][pos:pos+20]
+        #         np_info = get_np_info(bases_to_int(refseq))
+        #         np_info_seq = get_np_info(bases_to_int(ins+refseq))
+        #         cnv = False
+        #         for n in range(1, cfg.args.max_n+1):
+        #             n_idx = n-1
+        #             if np_info[0, L, n_idx] and np_info_seq[0, L, n_idx]:
+        #                 if len(ins) % n == 0 and ins[:n] == refseq[:n]:
+        #                     data.cnvs[TRUE] += 1
+        #                     cnv = True
+        #                     break
+        #         if not cnv:
+        #             data.cnvs[FALSE] += 1
 
-            if type(ref_type) != tuple and \
-                    len(set([x for x in ref_gt if x])) == 1 and \
-                    types[ref_type[0]] == "deletion":
-                ref = record.alleles[0]
-                alt = record.alleles[[x for x in ref_gt if x != 0][0]] # first non-ref allele
-                pos = record.pos-1 + len(alt)
-                dell = ref[len(alt):]
-                refseq = cfg.args.refs[record.contig][pos:pos+20]
-                np_info = get_np_info(bases_to_int(refseq))
-                cnv = False
-                for n in range(1, cfg.args.max_n+1):
-                    n_idx = n-1
-                    if np_info[0, L, n_idx] and len(dell) % n == 0: # np start
-                        data.cnvs[TRUE] += 1
-                        cnv = True
-                        break
-                if not cnv:
-                    data.cnvs[FALSE] += 1
+        #     if type(ref_type) != tuple and \
+        #             len(set([x for x in ref_gt if x])) == 1 and \
+        #             types[ref_type[0]] == "deletion":
+        #         ref = record.alleles[0]
+        #         alt = record.alleles[[x for x in ref_gt if x != 0][0]] # first non-ref allele
+        #         pos = record.pos-1 + len(alt)
+        #         dell = ref[len(alt):]
+        #         refseq = cfg.args.refs[record.contig][pos:pos+20]
+        #         np_info = get_np_info(bases_to_int(refseq))
+        #         cnv = False
+        #         for n in range(1, cfg.args.max_n+1):
+        #             n_idx = n-1
+        #             if np_info[0, L, n_idx] and len(dell) % n == 0: # np start
+        #                 data.cnvs[TRUE] += 1
+        #                 cnv = True
+        #                 break
+        #         if not cnv:
+        #             data.cnvs[FALSE] += 1
 
     return data
 
@@ -195,109 +195,105 @@ def error_pie(data, suffix=""):
 
 def plot_sankey(all_data, np_data=None, np_sizes=None):
 
-    left = ["Substitutions"]*3 + ["Insertions"]*3 + ["Deletions"]*3 + ["Complex"]*3
-    right = ["True Positive", "False Negative", "False Positive"] * 4
-    sankey(
-            left = left,
-            right = right,
-            leftWeight = all_data.types.flatten(),
-            rightWeight = all_data.types.flatten(),
-            colorDict = cfg.args.colors,
-            rightColor = True,
-            fontsize = 12
-    )
-    fig = plt.gcf()
-    fig.set_size_inches(4, 6)
-    plt.savefig("img/sankey0.png", bbox_inches="tight", dpi=300)
+    # sankey 0
+    left0 = ["Substitutions"]*3 + ["Insertions"]*3 + ["Deletions"]*3 + ["Complex"]*3
+    right0 = ["True Positive", "False Negative", "False Positive"] * 4
+    leftweight0 = all_data.types.flatten() / np.sum(all_data.types)
+    rightweight0 = all_data.types.flatten() / np.sum(all_data.types)
 
-    left = ["True Positive", "False Negative", "False Positive"]
-    sankey(
-            left = left,
-            right = left,
-            leftWeight = np.sum(all_data.types, axis=0) / np.sum(all_data.types),
-            rightWeight = [ 0, 
-                    np.sum(all_data.types[:,FN])/np.sum(all_data.types[:,1:]),
-                    np.sum(all_data.types[:,FP])/np.sum(all_data.types[:,1:])
-                    ],
-            colorDict = cfg.args.colors,
-            fontsize = 12
-    )
-    fig = plt.gcf()
-    fig.set_size_inches(4, 6)
-    plt.savefig("img/sankey1.png", bbox_inches="tight", dpi=300)
+    # sankey 1
+    left1 = ["True Positive", "False Negative", "False Positive"]
+    right1 = ["True Positive", "False Negative", "False Positive"]
+    leftweight1 = np.sum(all_data.types, axis=0) / np.sum(all_data.types)
+    rightweight1 = [ 
+            0, 
+            np.sum(all_data.types[:,FN])/np.sum(all_data.types[:,1:]),
+            np.sum(all_data.types[:,FP])/np.sum(all_data.types[:,1:])
+    ]
 
-    left = ["False Negative"]*(cfg.args.max_n+1) + \
-            ["False Positive"]*(cfg.args.max_n+1)
-    right = (["Other"] + [f"{i}-Polymer" for i in range(1, cfg.args.max_n+1)])* 2
-    weights = [np.sum(np_data[i].types[:,FN]) for i in range(cfg.args.max_n+1)] + \
-            [np.sum(np_data[i].types[:,FP]) for i in range(cfg.args.max_n+1)]
     sankey(
-            left = left,
-            right = right,
-            leftWeight = weights,
-            rightWeight = weights,
-            aspect = 20,
-            colorDict = cfg.args.colors,
-            fontsize = 12
+            lefts = [left0, left1],
+            rights = [right0, right1],
+            colors = cfg.args.colors,
+            leftWeights = [leftweight0, leftweight1],
+            rightWeights = [rightweight0, rightweight1],
+            rightColors = [True, False],
+            fontsize = 12,
+            figureName = "img/sankey",
     )
-    fig = plt.gcf()
-    plt.savefig("img/sankey2.png", bbox_inches="tight", dpi=300)
 
-    labels = ["Other"] + [f"{i}-Polymer" for i in range(1, cfg.args.max_n+1)]
-    total_errors = sum([np.sum(np_data[i].types[:,1:]) \
-            for i in range(cfg.args.max_n+1)])
-    left_weights = [np.sum(np_data[i].types[:,1:])/total_errors \
-            for i in range(cfg.args.max_n+1)]
-    total_size = sum([np_sizes[f"np_{i}"] for i in range(cfg.args.max_n+1)])
-    right_weights = [np_sizes[f"np_{i}"] for i in range(cfg.args.max_n+1)] / \
-            total_size
-    sankey(
-            left = labels,
-            right = labels,
-            leftWeight = left_weights,
-            rightWeight = right_weights,
-            aspect = 20,
-            colorDict = cfg.args.colors,
-            fontsize = 12
-    )
-    fig = plt.gcf()
-    plt.savefig("img/sankey3.png", bbox_inches="tight", dpi=300)
+    # left = ["False Negative"]*(cfg.args.max_n+1) + \
+    #         ["False Positive"]*(cfg.args.max_n+1)
+    # right = (["Other"] + [f"{i}-Polymer" for i in range(1, cfg.args.max_n+1)])* 2
+    # weights = [np.sum(np_data[i].types[:,FN]) for i in range(cfg.args.max_n+1)] + \
+    #         [np.sum(np_data[i].types[:,FP]) for i in range(cfg.args.max_n+1)]
+    # sankey(
+    #         left = left,
+    #         right = right,
+    #         leftWeight = weights,
+    #         rightWeight = weights,
+    #         aspect = 20,
+    #         colorDict = cfg.args.colors,
+    #         fontsize = 12
+    # )
+    # fig = plt.gcf()
+    # plt.savefig("img/sankey2.png", bbox_inches="tight", dpi=300)
 
-    labels = ["Other"] + [f"{i}-Polymer" for i in range(1, cfg.args.max_n+1)]
-    total_size = sum([np_sizes[f"np_{i}"] for i in range(cfg.args.max_n+1)])
-    left_weights = [np_sizes[f"np_{i}"] for i in range(cfg.args.max_n+1)] / total_size
-    total = sum([np.sum(np_data[i].types[INS,:2]) + np.sum(np_data[i].types[DEL,:2]) \
-            for i in range(cfg.args.max_n+1)])
-    right_weights = [( np.sum(np_data[i].types[INS,:2]) + \
-            np.sum(np_data[i].types[DEL,:2]) ) / total \
-            for i in range(cfg.args.max_n+1)]
-    sankey(
-            left = labels,
-            right = labels,
-            leftWeight = left_weights,
-            rightWeight = right_weights,
-            aspect = 20,
-            colorDict = cfg.args.colors,
-            fontsize = 12
-    )
-    fig = plt.gcf()
-    plt.savefig("img/sankey4.png", bbox_inches="tight", dpi=300)
+    # labels = ["Other"] + [f"{i}-Polymer" for i in range(1, cfg.args.max_n+1)]
+    # total_errors = sum([np.sum(np_data[i].types[:,1:]) \
+    #         for i in range(cfg.args.max_n+1)])
+    # left_weights = [np.sum(np_data[i].types[:,1:])/total_errors \
+    #         for i in range(cfg.args.max_n+1)]
+    # total_size = sum([np_sizes[f"np_{i}"] for i in range(cfg.args.max_n+1)])
+    # right_weights = [np_sizes[f"np_{i}"] for i in range(cfg.args.max_n+1)] / \
+    #         total_size
+    # sankey(
+    #         left = labels,
+    #         right = labels,
+    #         leftWeight = left_weights,
+    #         rightWeight = right_weights,
+    #         aspect = 20,
+    #         colorDict = cfg.args.colors,
+    #         fontsize = 12
+    # )
+    # fig = plt.gcf()
+    # plt.savefig("img/sankey3.png", bbox_inches="tight", dpi=300)
 
-    left_labels = ["Other"]*2 + [f"{n}-Polymer" for i in 
-            range(1, cfg.args.max_n+1) for n in [i,i]]
-    right_labels = ["General INDEL", "Copy Number Variant"]*(cfg.args.max_n+1)
-    weights = [w for i in range(cfg.args.max_n+1) for w in np_data[i].cnvs]
-    sankey(
-            left = left_labels,
-            right = right_labels,
-            leftWeight = weights,
-            rightWeight = weights,
-            aspect = 20,
-            colorDict = cfg.args.colors,
-            fontsize = 12
-    )
-    fig = plt.gcf()
-    plt.savefig("img/sankey5.png", bbox_inches="tight", dpi=300)
+    # labels = ["Other"] + [f"{i}-Polymer" for i in range(1, cfg.args.max_n+1)]
+    # total_size = sum([np_sizes[f"np_{i}"] for i in range(cfg.args.max_n+1)])
+    # left_weights = [np_sizes[f"np_{i}"] for i in range(cfg.args.max_n+1)] / total_size
+    # total = sum([np.sum(np_data[i].types[INS,:2]) + np.sum(np_data[i].types[DEL,:2]) \
+    #         for i in range(cfg.args.max_n+1)])
+    # right_weights = [( np.sum(np_data[i].types[INS,:2]) + \
+    #         np.sum(np_data[i].types[DEL,:2]) ) / total \
+    #         for i in range(cfg.args.max_n+1)]
+    # sankey(
+    #         left = labels,
+    #         right = labels,
+    #         leftWeight = left_weights,
+    #         rightWeight = right_weights,
+    #         aspect = 20,
+    #         colorDict = cfg.args.colors,
+    #         fontsize = 12
+    # )
+    # fig = plt.gcf()
+    # plt.savefig("img/sankey4.png", bbox_inches="tight", dpi=300)
+
+    # left_labels = ["Other"]*2 + [f"{n}-Polymer" for i in 
+    #         range(1, cfg.args.max_n+1) for n in [i,i]]
+    # right_labels = ["General INDEL", "Copy Number Variant"]*(cfg.args.max_n+1)
+    # weights = [w for i in range(cfg.args.max_n+1) for w in np_data[i].cnvs]
+    # sankey(
+    #         left = left_labels,
+    #         right = right_labels,
+    #         leftWeight = weights,
+    #         rightWeight = weights,
+    #         aspect = 20,
+    #         colorDict = cfg.args.colors,
+    #         fontsize = 12
+    # )
+    # fig = plt.gcf()
+    # plt.savefig("img/sankey5.png", bbox_inches="tight", dpi=300)
 
 
 
@@ -324,11 +320,12 @@ def get_region_sizes(beds):
 
 def main():
 
-    print(f'> extracting reference contigs')
-    cfg.args.refs = {}
-    ref = pysam.FastaFile(cfg.args.ref)
-    for ctg in ref.references:
-        cfg.args.refs[ctg] = get_fasta(cfg.args.ref, ctg)
+    # print(f'> extracting reference contigs')
+    # cfg.args.refs = {}
+    # ref = pysam.FastaFile(cfg.args.ref)
+    # # for ctg in ref.references:
+    # for ctg in ["chr20", "chr21", "chr22"]:
+    #     cfg.args.refs[ctg] = get_fasta(cfg.args.ref, ctg)
 
     print("> calculating 'all' stats")
     all_data = count(cfg.args.vcfs.replace("$", "all"))
@@ -336,26 +333,27 @@ def main():
     print("> plotting 'all'")
     disc_pie(all_data)
     error_pie(all_data)
+    plot_sankey(all_data)
 
-    print("ALL")
-    print(all_data)
+    # print("ALL")
+    # print(all_data)
 
-    print("> calculating BED sizes")
-    sizes = get_region_sizes(cfg.args.beds)
-    for name, size in sizes.items():
-        print(f'{name}: {size}')
+    # print("> calculating BED sizes")
+    # sizes = get_region_sizes(cfg.args.beds)
+    # for name, size in sizes.items():
+    #     print(f'{name}: {size}')
 
-    with mp.Pool() as pool:
-        np_data = pool.map(count, [cfg.args.vcfs.replace("$", f"np_{i}") 
-                for i in range(cfg.args.max_n+1)])
+    # with mp.Pool() as pool:
+    #     np_data = pool.map(count, [cfg.args.vcfs.replace("$", f"np_{i}") 
+    #             for i in range(cfg.args.max_n+1)])
 
-    for i in range(cfg.args.max_n+1):
-        disc_pie(np_data[i], suffix=f'np{i}')
-        error_pie(np_data[i], suffix=f'np{i}')
-        print(f"NP {i}")
-        print(np_data[i])
+    # for i in range(cfg.args.max_n+1):
+    #     disc_pie(np_data[i], suffix=f'np{i}')
+    #     error_pie(np_data[i], suffix=f'np{i}')
+    #     print(f"NP {i}")
+    #     print(np_data[i])
 
-    plot_sankey(all_data, np_data, sizes)
+    # plot_sankey(all_data, np_data, sizes)
 
 
 
