@@ -219,6 +219,10 @@ cpdef int[:,:,::1] get_np_info(char[::1] seq):
 
     for seq_idx in range(seq_len): # iterate over sequence
 
+        # if base 'N' (encoded as 0), skip
+        if not seq[seq_idx]:
+            continue
+
         for n in range(1, max_n+1): # check each length N-polymer
             n_idx = n-1
 
