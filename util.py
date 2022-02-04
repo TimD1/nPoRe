@@ -19,13 +19,12 @@ def get_bam_regions():
     try:
         ref = pysam.FastaFile(cfg.args.ref)
     except (AttributeError, IOError, ValueError):
-        print(f"\nERROR: could not open FASTA '{cfg.args.ref}'.")
+        print(f"\nERROR: could not open 'cfg.args.ref' FASTA.")
         exit(1)
     try:
         bam = pysam.AlignmentFile(cfg.args.bam)
     except (AttributeError, IOError, ValueError):
-        print(f"\nERROR: could not open BAM '{cfg.args.bam}'.")
-        exit(1)
+        print(f"WARNING: could not open 'cfg.args.bam' BAM. ")
 
     # just align selected region
     if cfg.args.contig:
@@ -50,6 +49,16 @@ def get_bam_regions():
             end = ref.get_reference_length(contig)-1
             cfg.args.regions.append((contig, 0, end))
 
+    elif cfg.args.bed:
+        try: 
+            bed = open(cfg.args.bed, 'r')
+            regions = [x.strip().split() for x in bed.readlines()]
+            cfg.args.regions = [(ctg, int(start), int(stop)) for 
+                    ctg, start, stop in regions]
+        except FileNotFoundError:
+            print(f"\nERROR: could not open 'cfg.args.bed' BED.")
+            exit(1)
+
     # add all contigs
     else:
 
@@ -59,16 +68,20 @@ def get_bam_regions():
             exit(1)
 
         # verify that this contig is included in ref FASTA
-        cfg.args.regions = []
-        for ctg, l in zip(bam.references, bam.lengths):
-            if ctg not in ref.references:
-                print(f"WARNING: contig '{ctg}' present in '{cfg.args.bam}', but"
-                      f" not '{cfg.args.ref}', skipping...")
+        if cfg.args.bam:
+            cfg.args.regions = []
+            for ctg, l in zip(bam.references, bam.lengths):
+                if ctg not in ref.references:
+                    print(f"WARNING: contig '{ctg}' present in '{cfg.args.bam}', but"
+                          f" not '{cfg.args.ref}', skipping...")
 
-            # verify that this contig has reads
-            else:
-                if bam.count(ctg, 0, l-1):
-                    cfg.args.regions.append((ctg, 0, l-1))
+                # verify that this contig has reads
+                else:
+                    if bam.count(ctg, 0, l-1):
+                        cfg.args.regions.append((ctg, 0, l-1))
+        else:
+            for ctg, l in zip(ref.references, ref.lengths):
+                cfg.args.regions.append((ctg, 0, l-1))
 
 
 
