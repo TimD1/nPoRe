@@ -7,7 +7,6 @@ from matplotlib import rc
 rc('font', **{'family': 'DejaVu Serif', 'serif': ['Computer Modern']})
 import numpy as np
 import pandas as pd
-import seaborn as sns
 
 
 def sankey(lefts, rights, colors, leftWeights=None, rightWeights=None,

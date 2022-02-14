@@ -2,9 +2,5 @@ pysam
 numpy
 cython
 matplotlib
-scipy
 biopython
-pickle
-pySankey
 pandas
-seaborn

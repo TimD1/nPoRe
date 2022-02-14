@@ -2,7 +2,6 @@ import numpy as np
 import math
 np.set_printoptions(linewidth=200)
 import matplotlib.pyplot as plt
-from scipy import ndimage
 import cython
 
 import cfg
@@ -71,7 +70,6 @@ def calc_score_matrices(subs, nps, inss, dels, eps=0.01):
                 count = int(nps[n, ref_len, call_len])
                 frac = (count + eps) / (total + eps)
                 np_scores[n, ref_len, call_len] = -np.log(frac)
-        # np_scores[n] = ndimage.gaussian_filter(np_scores[n], sigma=1)
     np_scores = fix_matrix_properties(np_scores)
 
     # calculate substitution scores matrix

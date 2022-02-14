@@ -5,7 +5,7 @@ import multiprocessing as mp
 
 currentdir = os.path.dirname(os.path.realpath(__file__))
 parentdir = os.path.dirname(currentdir)
-sys.path.append(parentdir)
+sys.path.append(f'{parentdir}/src')
 
 import cfg as cfg
 from util import get_fasta
