@@ -2,9 +2,9 @@ from setuptools import setup, Extension
 from Cython.Build import cythonize
 
 extensions = [ 
-        Extension("aln", ["aln.pyx"]),
-        Extension("cig", ["cig.pyx"]),
-        Extension("bam", ["bam.pyx"]) 
+        Extension("aln", ["src/aln.pyx"]),
+        Extension("cig", ["src/cig.pyx"]),
+        Extension("bam", ["src/bam.pyx"]) 
 ]
 
 setup(
