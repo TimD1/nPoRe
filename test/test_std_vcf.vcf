@@ -1,0 +1,15 @@
+##fileformat=VCFv4.2
+##FILTER=<ID=PASS,Description="All filters passed">
+##contig=<ID=chr18,length=80373285>
+##contig=<ID=chr19,length=58617616>
+##contig=<ID=chr20,length=64444167>
+##contig=<ID=chr21,length=46709983>
+##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">
+##FORMAT=<ID=GQ,Number=1,Type=Integer,Description="Genotype quality score">
+##INFO=<ID=END,Number=1,Type=Integer,Description="Stop position of the interval">
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO	FORMAT	SAMPLE
+chr18	1	.	A	G	60	PASS	.	GT	1|1
+chr18	3	.	A	ACCCTA	60	PASS	.	GT	0|1
+chr19	1	.	C	CAA	60	PASS	.	GT	1|1
+chr19	5	.	G	GAG	60	PASS	.	GT	1|0
+chr19	15	.	C	G	60	PASS	.	GT	1|1

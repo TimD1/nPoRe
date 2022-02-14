@@ -105,5 +105,5 @@ reads_sam.close()
 # convert sam to bam
 path = os.getcwd()
 subprocess.call([
-    "/home/timdunn/NanoporeScripts/align", f"{path}/reads.sam", f"{path}/ref.fasta"
+    "../scripts/align.sh", f"{path}/reads.sam", f"{path}/ref.fasta"
 ])

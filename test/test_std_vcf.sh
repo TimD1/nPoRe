@@ -5,8 +5,8 @@ bgzip -f test_std_vcf.vcf
 tabix -f -p vcf test_std_vcf.vcf.gz
 
 echo "> standardizing VCF"
-python3 ../standardize_vcf.py \
+python3 ../src/standardize_vcf.py \
     test_std_vcf.vcf.gz \
     test_std_ref.fasta \
     test_std \
-    --stats_dir /home/timdunn/ReAligner/guppy5_stats
+    --stats_dir ../guppy5_stats

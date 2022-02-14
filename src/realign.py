@@ -30,6 +30,7 @@ def argparser():
     parser.add_argument("--contig_beg", type=int)
     parser.add_argument("--contig_end", type=int)
     parser.add_argument("--max_reads", type=int, default=0)
+    parser.add_argument("--bed", type=str)
 
     # algorithm parameters
     parser.add_argument("--max_n", type=int, default=6)

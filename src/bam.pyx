@@ -101,10 +101,7 @@ def realign_hap(hap_data):
     cigar = align(int_ref, int_seq, cigar, cfg.args.sub_scores, cfg.args.np_scores)
 
     ### STANDARDIZE ###
-    if cfg.args.indel_cigar:
-        cigar = cigar.replace('X', 'DI').replace('=','M')
-    else: 
-        cigar = cigar.replace('X', 'M').replace('=','M')
+    cigar = cigar.replace('X', 'M').replace('=','M')
     cig_len = len(cigar)
     nshifts_buf = np.zeros(cig_len, dtype = np.uint8)
     shiftlen_buf = np.zeros(cig_len, dtype = np.uint8)

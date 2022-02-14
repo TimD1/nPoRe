@@ -9,7 +9,6 @@ build
 *.so
 *.html
 venv*
-test/out*
 *.vcf*
 *.nfs*
 *.ipynb*

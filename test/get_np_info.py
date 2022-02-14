@@ -4,9 +4,9 @@ import numpy as np
 
 currentdir = os.path.dirname(os.path.realpath(__file__))
 parentdir = os.path.dirname(currentdir)
-sys.path.append(parentdir)
+sys.path.append(f'{parentdir}/src')
 
-from aln import get_np_info
+from aln import get_np_info, print_np_info
 import cfg
 
 # create test cases
@@ -36,15 +36,15 @@ def main():
         int_seq = np.zeros(len(seq), dtype=np.uint8)
         for i in range(len(seq)): 
             int_seq[i] = cfg.base_dict[seq[i]]
-        np_info = get_np_info(int_seq)
-        print_results(seq, np_info)
+        print_np_info(int_seq)
 
 def argparser():
     parser = argparse.ArgumentParser(
             formatter_class = argparse.ArgumentDefaultsHelpFormatter,
             add_help = False
     )
-    parser.add_argument("--max_n", type=int, default=10)
+    parser.add_argument("--max_n", type=int, default=6)
+    parser.add_argument("--max_l", type=int, default=100)
     return parser
 
 
