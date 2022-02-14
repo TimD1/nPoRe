@@ -1,34 +1,18 @@
-# -*- coding: utf-8 -*-
-"""
-Produces simple Sankey Diagrams with matplotlib.
-@author: Anneya Golob & marcomanz & pierre-sassoulas & jorwoods
-                      .-.
-                 .--.(   ).--.
-      <-.  .-.-.(.->          )_  .--.
-       `-`(     )-'             `)    )
-         (o  o  )                `)`-'
-        (      )                ,)
-        ( ()  )                 )
-         `---"\    ,    ,    ,/`
-               `--' `--' `--'
-                |  |   |   |
-                |  |   |   |
-                '  |   '   |
-"""
-
 from collections import defaultdict
 
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+from matplotlib import rc
+rc('font', **{'family': 'DejaVu Serif', 'serif': ['Computer Modern']})
 import numpy as np
 import pandas as pd
 import seaborn as sns
 
 
 def sankey(lefts, rights, colors, leftWeights=None, rightWeights=None,
-           leftLabels=None, rightLabels=None, rightColors=None,
-           fontsize=14, figureName=None):
+           leftLabels=None, rightLabels=None, rightColors=None, gaps=None,
+           fontsize=14, figureName=None, bottoms = None):
     '''
     Make Sankey Diagram showing flow from left-->right
     Inputs:
@@ -53,12 +37,19 @@ def sankey(lefts, rights, colors, leftWeights=None, rightWeights=None,
     # set default labels and weights
     if rightColors is None:
         rightColors = [False] * len(rights)
-    assert(len(lefts) == len(rights) == len(rightWeights) == \
-            len(leftWeights) == len(rightColors))
+    assert(len(lefts) == len(rights) == len(rightWeights) == len(gaps) == \
+            len(leftWeights) == len(rightColors) == len(bottoms)-1)
 
     plt.figure()
     plt.rc('text', usetex=False)
     plt.rc('font', family='serif')
+
+    for idx, label in enumerate(bottoms):
+        plt.text(
+            idx, 0, label,
+            {'ha': 'center', 'va': 'top'},
+            fontsize=fontsize+2, fontweight='bold'
+        )
 
     n = len(lefts)
     for idx, (left, right, leftWeight, rightWeight, rightColor) in \
@@ -103,8 +94,8 @@ def sankey(lefts, rights, colors, leftWeights=None, rightWeights=None,
             myD = {}
             myD['left'] = dataFrame[dataFrame.left == leftLabel].leftWeight.sum()
             if i == 0:
-                myD['bottom'] = 0
-                myD['top'] = myD['left']
+                myD['bottom'] = 0.02 * dataFrame.leftWeight.sum()
+                myD['top'] = myD['bottom'] + myD['left']
             else:
                 myD['bottom'] = leftWidths[leftLabels[i - 1]]['top'] + \
                         0.02 * dataFrame.leftWeight.sum()
@@ -118,8 +109,12 @@ def sankey(lefts, rights, colors, leftWeights=None, rightWeights=None,
             myD = {}
             myD['right'] = dataFrame[dataFrame.right == rightLabel].rightWeight.sum()
             if i == 0:
-                myD['bottom'] = 0
-                myD['top'] = myD['right']
+                myD['bottom'] = 0.02 * dataFrame.rightWeight.sum()
+                myD['top'] = myD['bottom'] + myD['right']
+                if myD['right']:
+                    myD['top'] = myD['bottom'] + myD['right']
+                else:
+                    myD['top'] = 0
             else:
                 myD['bottom'] = rightWidths[rightLabels[i - 1]]['top'] + \
                         0.02 * dataFrame.rightWeight.sum()
@@ -133,13 +128,32 @@ def sankey(lefts, rights, colors, leftWeights=None, rightWeights=None,
         # Draw vertical bars on left and right of each  label's section & print label
         for leftLabel in leftLabels:
             if leftWidths[leftLabel]['left']: # skip if weight is zero
-                plt.fill_between(
-                    [idx-bar_width, idx+bar_width],
-                    2 * [leftWidths[leftLabel]['bottom']],
-                    2 * [leftWidths[leftLabel]['bottom'] + leftWidths[leftLabel]['left']],
-                    color=colors[leftLabel],
-                    alpha=0.99
-                )
+                if gaps[idx]:
+                    plt.fill_between(
+                        [idx-3*bar_width, idx-bar_width],
+                        2 * [leftWidths[leftLabel]['bottom']],
+                        2 * [leftWidths[leftLabel]['bottom'] + leftWidths[leftLabel]['left']],
+                        color=colors[leftLabel],
+                        alpha=0.99,
+                        linewidth=0,
+                    )
+                    plt.fill_between(
+                        [idx+bar_width, idx+3*bar_width],
+                        2 * [leftWidths[leftLabel]['bottom']],
+                        2 * [leftWidths[leftLabel]['bottom'] + leftWidths[leftLabel]['left']],
+                        color=colors[leftLabel],
+                        alpha=0.99,
+                        linewidth=0,
+                    )
+                else:
+                    plt.fill_between(
+                        [idx-bar_width, idx+bar_width],
+                        2 * [leftWidths[leftLabel]['bottom']],
+                        2 * [leftWidths[leftLabel]['bottom'] + leftWidths[leftLabel]['left']],
+                        color=colors[leftLabel],
+                        alpha=0.99,
+                        linewidth=0,
+                    )
                 if idx == 0:
                     ha = 'left'
                 else:
@@ -159,7 +173,8 @@ def sankey(lefts, rights, colors, leftWeights=None, rightWeights=None,
                         2 * [rightWidths[rightLabel]['bottom']],
                         2 * [rightWidths[rightLabel]['bottom'] + rightWidths[rightLabel]['right']],
                         color=colors[rightLabel],
-                        alpha=0.99
+                        alpha=0.99,
+                        linewidth=0,
                     )
                     plt.text(
                         idx+1,
@@ -195,14 +210,21 @@ def sankey(lefts, rights, colors, leftWeights=None, rightWeights=None,
                         # Update bottom edges at each label
                         leftWidths[leftLabel]['bottom'] += ns_l[leftLabel][rightLabel]
                         rightWidths[rightLabel]['bottom'] += ns_r[leftLabel][rightLabel]
+                        start = idx+bar_width
+                        end = idx+1-bar_width
+                        if gaps[idx]:
+                            start = idx + 3*bar_width
+                        if idx < n-1 and gaps[idx+1]:
+                            end = idx+1 - 3*bar_width
+
                         plt.fill_between(
-                            np.linspace(idx+bar_width, idx+1-bar_width, \
-                                    len(ys_d)), ys_d, ys_u, alpha=0.65,
+                            np.linspace(start, end, \
+                                    len(ys_d)), ys_d, ys_u, alpha=0.75,
                             facecolor='none', linewidth=0,
                             color=colors[labelColor]
                         )
     plt.gca().axis('off')
-    plt.gcf().set_size_inches(4*n, 6)
+    plt.gcf().set_size_inches(3*n, 4.5)
     if figureName != None:
         plt.savefig("{}.png".format(figureName), bbox_inches='tight', dpi=300)
         plt.close()
