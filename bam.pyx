@@ -78,9 +78,6 @@ def realign_read(read_data):
 
     ### WRITE ###
     with cfg.counter.get_lock():
-        cfg.counter.value += 1
-        print(f"\r    {cfg.counter.value} reads processed.", end='', flush=True)
-
         out_bam_fh = open(f'{cfg.args.out_prefix}.sam', 'a')
         print(f"{read_id}\t{flag}\t{ref_name}\t{start+1}\t{mapq}\t{collapse_cigar(cigar)}\t*\t0\t{stop-start}\t{seq}\t{quals}\tHP:i:{hap}", file=out_bam_fh)
         out_bam_fh.close()

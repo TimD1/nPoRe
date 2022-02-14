@@ -86,9 +86,7 @@ def main():
     start = perf_counter()
     with mp.Pool() as pool:
         print('> computing individual read realignments')
-        with cfg.counter.get_lock(): cfg.counter.value = 0
-        print(f"\r    0 reads processed.", end='', flush=True)
-        read_data = pool.imap_unordered(realign_read, read_data, chunksize=100)
+        pool.imap_unordered(realign_read, read_data, chunksize=100)
         pool.close()
         pool.join()
     print(f'\n    runtime: {perf_counter()-start:.2f}s')
