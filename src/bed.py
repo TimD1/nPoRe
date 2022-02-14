@@ -15,23 +15,40 @@ import cfg as cfg
 def argparser():
     parser = argparse.ArgumentParser(
             formatter_class = argparse.ArgumentDefaultsHelpFormatter,
-            add_help = False
     )
-    parser.add_argument("--ref")
-    parser.add_argument("--bed")
+    parser.add_argument("--ref", required=True,
+            help="Input reference FASTA.")
+    parser.add_argument("--bed", required=True,
+            help="Input BED containing regions for which to compute reference "
+            "n-polymer information. If '--contig*' is used, '--bed' is still "
+            "required to determine complement non n-polymer regions.")
 
     # other options for region (must also specify BED for complement)
-    parser.add_argument("--contig")
-    parser.add_argument("--contigs")
-    parser.add_argument("--contig_beg", type=int)
-    parser.add_argument("--contig_end", type=int)
+    parser.add_argument("--contig", type=str,
+            help="Allows specifying a single contig to for which to compute "
+            "n-polymer information; it can be used in combination with "
+            "'--contig_beg' and '--contig_end'.")
+    parser.add_argument("--contig_beg", type=int,
+            help='Start of region for which n-polymers are calculated.')
+    parser.add_argument("--contig_end", type=int,
+            help='End of region for which n-polymers are calculated.')
+    parser.add_argument("--contigs", type=str,
+            help="Allows specifying multiple contigs.")
 
-    parser.add_argument("-chunk_width", type=int, default=1000000)
+    parser.add_argument("-chunk_width", type=int, default=1000000,
+            help="Reference is considered in chunks of size '--chunk_width' when "
+            "calculating n-polymer information.")
 
-    parser.add_argument("--max_n", type=int, default=6)
-    parser.add_argument("--max_l", type=int, default=100)
+    parser.add_argument("--max_n", type=int, default=6,
+            help="Maximum n-polymer length (period of repeating sequence) "
+            "considered.")
+    parser.add_argument("--max_l", type=int, default=100,
+            help="Maximum length (number of times a repeated sequence occurs)"
+            " considered.")
 
-    parser.add_argument("--out", default="out")
+    parser.add_argument("--out_prefix", required=True,
+            help="Output BED file prefix.")
+
     return parser
 
 
@@ -60,7 +77,7 @@ def get_np_regions(region):
 
 
 
-def save_np_region_beds(np_regions, outfile, slop=1):
+def save_np_region_beds(np_regions, out_prefix, slop=1):
 
     # sort and merge BEDs by n-polymer
     print(f'> saving n-polymer BEDs, n = 1-{cfg.args.max_n}')
@@ -69,29 +86,29 @@ def save_np_region_beds(np_regions, outfile, slop=1):
 
         # print all data to file
         n_idx = n-1
-        with open(f'{outfile}_{n}.bed', 'w') as bedfile:
+        with open(f'{out_prefix}_{n}.bed', 'w') as bedfile:
             for ctg_data in np_regions:
                 for ctg, start, stop in ctg_data[n_idx]:
                     print(f'{ctg}\t{max(0,start-slop)}\t{stop+slop}', file=bedfile)
 
         # sort and merge overlaps
         merge = subprocess.Popen(["bedtools", "merge", "-i", 
-                f'{outfile}_{n}.bed'],
+                f'{out_prefix}_{n}.bed'],
                 stdout = subprocess.PIPE)
         sed1 = subprocess.Popen(["sed", "s/^chr//"], stdin = merge.stdout,
                 stdout = subprocess.PIPE)
         sort1 = subprocess.Popen(["sort", "-k1,1n", "-k2,2n", "-k3,3n"], 
                 stdin = sed1.stdout, stdout = subprocess.PIPE)
-        with open(f'{outfile}_{n}tmp.bed', 'w') as tmpbedfile:
+        with open(f'{out_prefix}_{n}tmp.bed', 'w') as tmpbedfile:
             sed2 = subprocess.run(["sed", "s/^[0-9]/chr&/"], 
                     stdin = sort1.stdout, stdout = tmpbedfile)
-        subprocess.run(["mv", f'{outfile}_{n}tmp.bed', f'{outfile}_{n}.bed'])
+        subprocess.run(["mv", f'{out_prefix}_{n}tmp.bed', f'{out_prefix}_{n}.bed'])
     print(f'    runtime: {perf_counter()-start_timer:.2f}s')
 
     # merge into single n-polymer BED
     print(f'> merging n-polymer BEDs')
     start_timer = perf_counter()
-    beds = [f'{outfile}_{n}.bed' for n in range(1, cfg.args.max_n+1)]
+    beds = [f'{out_prefix}_{n}.bed' for n in range(1, cfg.args.max_n+1)]
     cat = subprocess.Popen(["cat"] + beds, stdout = subprocess.PIPE)
     sed3 = subprocess.Popen(["sed", "s/^chr//"], stdin = cat.stdout,
             stdout = subprocess.PIPE)
@@ -99,7 +116,7 @@ def save_np_region_beds(np_regions, outfile, slop=1):
             stdin = sed3.stdout, stdout = subprocess.PIPE)
     sed4 = subprocess.Popen(["sed", "s/^[0-9]/chr&/"], 
             stdin = sort2.stdout, stdout = subprocess.PIPE)
-    with open(f'{outfile}_all.bed', 'w') as allbedfile:
+    with open(f'{out_prefix}_all.bed', 'w') as allbedfile:
         subprocess.run(["bedtools", "merge"],
                 stdin = sed4.stdout, stdout = allbedfile)
     print(f'    runtime: {perf_counter()-start_timer:.2f}s')
@@ -118,9 +135,9 @@ def save_np_region_beds(np_regions, outfile, slop=1):
 
     print(f'> finding complement')
     start_timer = perf_counter()
-    with open(f'{outfile}_0.bed', 'w') as blandbedfile:
+    with open(f'{out_prefix}_0.bed', 'w') as blandbedfile:
         subprocess.run(["bedtools", "complement", "-L", 
-            "-i", f'{outfile}_all.bed', "-g", cfg.args.genome], 
+            "-i", f'{out_prefix}_all.bed', "-g", cfg.args.genome], 
             stdout = blandbedfile)
     print(f'    runtime: {perf_counter()-start_timer:.2f}s')
 
@@ -145,7 +162,7 @@ def main():
         np_regions = pool.map(get_np_regions, ranges)
     print(f'    runtime: {perf_counter()-start:.2f}s')
 
-    save_np_region_beds(np_regions, cfg.args.out, slop=1)
+    save_np_region_beds(np_regions, cfg.args.out_prefix, slop=1)
 
 
 

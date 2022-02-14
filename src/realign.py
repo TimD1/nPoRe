@@ -16,34 +16,59 @@ def argparser():
 
     parser = argparse.ArgumentParser(
             formatter_class = argparse.ArgumentDefaultsHelpFormatter,
-            add_help = False
     )
 
     # mandatory args
-    parser.add_argument("bam")
-    parser.add_argument("ref")
-    parser.add_argument("out_prefix")
+    parser.add_argument("--bam", required=True,
+            help="Input BAM to be realigned. Reads should be phased and tagged "
+            "with 'HP:i:1' or 'HP:i:2'. Unphased reads can be tagged with "
+            "'HP:i:0' using 'scripts/tag_unphased.py'."
+            )
+    parser.add_argument("--ref", required=True,
+            help="Input reference FASTA.")
+    parser.add_argument("--out_prefix", required=True,
+            help="Output SAM file prefix.")
 
     # region of interest
-    parser.add_argument("--contig", type=str)
-    parser.add_argument("--contigs", type=str)
-    parser.add_argument("--contig_beg", type=int)
-    parser.add_argument("--contig_end", type=int)
-    parser.add_argument("--max_reads", type=int, default=0)
-    parser.add_argument("--bed", type=str)
+    parser.add_argument("--contig", type=str,
+            help="Allows specifying a single contig to realign, can be used "
+            "in combination with '--contig_beg' and '--contig_end'. Reads outside "
+            "this region are ignored and not included in the output.")
+    parser.add_argument("--contig_beg", type=int,
+            help='Start of realigned region.')
+    parser.add_argument("--contig_end", type=int,
+            help='End of realigned region.')
+    parser.add_argument("--contigs", type=str,
+            help="Allows specifying multiple contigs to realign.")
+    parser.add_argument("--max_reads", type=int, default=0,
+            help="Allows limiting the number of realigned reads. If zero, all "
+            "reads in the selected region are realigned.")
+    parser.add_argument("--bed", type=str,
+            help="Allows specifying arbitrary realigned regions using a BED file.")
 
     # algorithm parameters
-    parser.add_argument("--max_n", type=int, default=6)
-    parser.add_argument("--max_l", type=int, default=100)
-    parser.add_argument("--chunk_width", type=int, default=100000)
+    parser.add_argument("--max_n", type=int, default=6,
+            help="Maximum n-polymer length (period of repeating sequence) "
+            "considered during read realignment.")
+    parser.add_argument("--max_l", type=int, default=100,
+            help="Maximum length (number of times a repeated sequence occurs)"
+            " considered during read realignment.")
+    parser.add_argument("--chunk_width", type=int, default=100000,
+            help="BAM is considered in chunks of size '--chunk_width' at a time "
+            "when calculating confusion matrices.")
 
     # path
-    parser.add_argument("--stats_dir", default="./stats")
+    parser.add_argument("--stats_dir", default="./stats",
+            help="Directory containing confusion matrices storing measured "
+            "probabilities of SUBs, INDELs, and N-polymer CNVs.")
 
     # boolean options
-    parser.add_argument("--plot", action="store_true")
-    parser.add_argument("--recalc_cms", action="store_true")
-    parser.add_argument("--recalc_exit", action="store_true")
+    parser.add_argument("--plot", action="store_true",
+            help="Plot confusion and score matrices, exit without realigning.")
+    parser.add_argument("--recalc_cms", action="store_true",
+            help="Recalculate confusion matrices using provided BAM.")
+    parser.add_argument("--recalc_exit", action="store_true",
+            help="Exit after recalculating confusion matrices, without realigning.")
 
 
     return parser

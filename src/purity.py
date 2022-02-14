@@ -156,12 +156,17 @@ def plot_purity(bam_scores, out):
 def argparser():
     parser = argparse.ArgumentParser(
             formatter_class = argparse.ArgumentDefaultsHelpFormatter,
-            add_help = False
     )
-    parser.add_argument("--bams", nargs='+')
-    parser.add_argument("--out", default="out")
-    parser.add_argument("--region", type=str)
-    parser.add_argument("--plot_only", action='store_true')
+    parser.add_argument("--bams", nargs=4, required=True,
+            help="Input BAMs from which to calculate Gini purity of pileups. "
+            " Four BAMS are expected, in this order: baseline hap1, baseline "
+            "hap2, realigned hap1, realigned hap2")
+    parser.add_argument("--region", type=str,
+            help="Region for which to compute pileup Gini purity.")
+    parser.add_argument("--out", default="out",
+            help="Output prefix for where to save calculations and plots.")
+    parser.add_argument("--plot_only", action='store_true',
+            help="Load cached calculations, and just re-plot.")
     return parser
 
 

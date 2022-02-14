@@ -46,27 +46,41 @@ def main():
 def argparser():
     parser = argparse.ArgumentParser(
             formatter_class = argparse.ArgumentDefaultsHelpFormatter,
-            add_help = False
     )
 
-    parser.add_argument("vcf", type=str)
-    parser.add_argument("ref", type=str)
-    parser.add_argument("out_prefix", type=str)
+    parser.add_argument("--vcf", type=str, required=True,
+            help="Input VCF to standardize.")
+    parser.add_argument("--ref", type=str, required=True,
+            help="Input reference FASTA corresponding to VCF.")
+    parser.add_argument("--out_prefix", type=str, required=True,
+            help="Output VCF prefix.")
 
-    parser.add_argument("--contig", type=str)
-    parser.add_argument("--contig_beg", type=int)
-    parser.add_argument("--contig_end", type=int)
-    parser.add_argument("--contigs", type=str)
+    parser.add_argument("--contig", type=str,
+            help="Allows specifying a single contig to standardize; it can be used "
+            "in combination with '--contig_beg' and '--contig_end'.")
+    parser.add_argument("--contig_beg", type=int,
+            help='Start of standardized region.')
+    parser.add_argument("--contig_end", type=int,
+            help='End of standardized region.')
+    parser.add_argument("--contigs", type=str,
+            help="Allows specifying multiple contigs to standardize.")
 
-    parser.add_argument("--stats_dir", default="./stats")
-    parser.add_argument("--recalc_cms", action="store_true")
-    parser.add_argument("--recalc_pileups", action="store_true")
+    parser.add_argument("--stats_dir", default="./stats",
+            help="Directory containing confusion matrices storing measured "
+            "probabilities of SUBs, INDELs, and N-polymer CNVs.")
 
-    parser.add_argument("--max_n", type=int, default=6)
-    parser.add_argument("--max_l", type=int, default=100)
-    parser.add_argument("--chunk_width", type=int, default=10000)
+    parser.add_argument("--max_n", type=int, default=6,
+            help="Maximum n-polymer length (period of repeating sequence) "
+            "considered during reference standardization.")
+    parser.add_argument("--max_l", type=int, default=100,
+            help="Maximum length (number of times a repeated sequence occurs)"
+            " considered during reference standardization.")
+    parser.add_argument("--chunk_width", type=int, default=100000,
+            help="BAM is considered in chunks of size '--chunk_width' at a time "
+            "when calculating confusion matrices.")
 
-    parser.add_argument("--min_qual", type=int, default=0)
+    parser.add_argument("--min_qual", type=int, default=0,
+            help="Only apply variants in VCF with quality above this threshold.")
     return parser
 
 
@@ -74,4 +88,5 @@ def argparser():
 if __name__ == "__main__":
     parser = argparser()
     cfg.args = parser.parse_args()
+    cfg.args.recalc_cms = False
     main()

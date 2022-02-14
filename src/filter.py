@@ -10,10 +10,11 @@ def main(args):
 def argparser():
     parser = argparse.ArgumentParser(
             formatter_class = argparse.ArgumentDefaultsHelpFormatter,
-            add_help = False
     )
-    parser.add_argument("vcf", type=str)
-    parser.add_argument("out", type=str)
+    parser.add_argument("--vcf", type=str, required=True,
+            help="Input VCF from which to filter overlaps.")
+    parser.add_argument("--out", type=str, required=True,
+            help="Output VCF filename.")
     return parser
 
 
