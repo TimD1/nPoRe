@@ -20,10 +20,7 @@ def argparser():
 
     # mandatory args
     parser.add_argument("--bam", required=True,
-            help="Input BAM to be realigned. Reads should be phased and tagged "
-            "with 'HP:i:1' or 'HP:i:2'. Unphased reads can be tagged with "
-            "'HP:i:0' using 'scripts/tag_unphased.py'."
-            )
+            help="Input BAM to be realigned.")
     parser.add_argument("--ref", required=True,
             help="Input reference FASTA.")
     parser.add_argument("--out_prefix", required=True,
