@@ -1,7 +1,8 @@
 .PHONY: npore
 npore:
-	test -d venv3 || (python3 -m venv venv3 --prompt "(npore) " && \
-		pip install -r requirements.txt)
+	test -d venv3 || (python3 -m venv venv3 --prompt "npore" && \
+		. ./venv3/bin/activate && \
+		pip install -r requirements.txt && deactivate)
 	. ./venv3/bin/activate
 	python3 setup.py build_ext --inplace
 	mv *.so src/
