@@ -65,20 +65,16 @@ For additional options, run `python3 realign.py --help`.
 `bed.py` | Module for computing n-polymer BED regions.
 `purity.py` | Module for computing a BAM pileup's Gini purity, for measuring read concordance.
 `filter.py` | Simple module for filtering overlapping variants.
-`aln.pyx` | Contains alignment-related functions.
-`bam.pyx` | Contains BAM-related functions.
-`cig.pyx` | Contains CIGAR-related functions.
-`cfg.py` | Contains global variables and configuration info.
-`vcf.py` | Contains VCF-related functions.
-`util.py` | Contains helper functions.
 
-`scripts/` | Helper scripts used during evaluation, example usage
+All other files contain functions used in the above modules.
+
+`scripts/` | Helper scripts used during evaluation
 ---: | ---
 `realign_pipeline.sh` | Main Clair3 retraining pipeline.
 `happy.sh` | Runs `hap.py` evaluation of all configurations/regions.
 `plot_results.py` | Plots final precision/recall graphs.
 `plot_sankey.py` | Generates Sankey plot of actual/error INDELs by n-polymer BED region.
-`calc_beds.sh` | Calculates n-polymer BEDS, running `bed.py`.
+`calc_beds.sh` | Calculates n-polymer BEDs, running `bed.py`.
 `sankey.py` | Custom Sankey plot library, extended from <a href="https://github.com/anazalea/pySankey">`pySankey`</a>.
 `purity.sh` | Calculates Gini purity.
 `align.sh` | Aligns reads to a reference, allowing multiple input formats.
@@ -94,15 +90,11 @@ For additional options, run `python3 realign.py --help`.
 
 `*stats/` | Directory storing cached confusion matrices
 ---: | ---
-`dels_cm.npy` | DELetions confusion matrix.
-`inss_cm.npy` | INSertions confusion matrix.
-`subs_cm.npy` | SUBsitutions confusion matrix.
-`nps_cm.npy` | N-Polymers confusion matrix.
 
 ## Data Sources
-The GRCh38 human reference sequence was downloaded from: s3://ont-open-data/gm24385_2020.09/config/ref/GCA_000001405.15_GRCh38_no_alt_analysis_set.fasta
-The Genome In A Bottle GRCh38 v4.1 ground truth VCF and benchmarking regions were downloaded from: https://ftp-trace.ncbi.nlm.nih.gov/ReferenceSamples/giab/release/AshkenazimTrio/HG002_NA24385_son/NISTv4.1/GRCh38/
-R9.4.1 reads basecalled with the Guppy 5.0.6 super-accuracy model were downloaded from ONT Open Datasets: s3://ont-open-data/gm24385_2020.11/analysis/r9.4.1/20201026_1644_2-E5-H5_PAG07162_d7f262d5/guppy_v4.0.11_r9.4.1_hac_prom/align_unfiltered/chrN/guppy_v5.0.6_r9.4.1_sup_prom/basecalls.fastq.gz
+The GRCh38 human reference sequence was downloaded from <a href="s3://ont-open-data/gm24385_2020.09/config/ref/GCA_000001405.15_GRCh38_no_alt_analysis_set.fasta">ONT Open Datasets</a>.
+The Genome In A Bottle GRCh38 v4.1 ground truth VCF and benchmarking regions were downloaded from <a href="https://ftp-trace.ncbi.nlm.nih.gov/ReferenceSamples/giab/release/AshkenazimTrio/HG002_NA24385_son/NISTv4.1/GRCh38/">here</a>.
+R9.4.1 reads basecalled with the Guppy 5.0.6 super-accuracy model were downloaded from <a href="s3://ont-open-data/gm24385_2020.11/analysis/r9.4.1/20201026_1644_2-E5-H5_PAG07162_d7f262d5/guppy_v4.0.11_r9.4.1_hac_prom/align_unfiltered/chrN/guppy_v5.0.6_r9.4.1_sup_prom/basecalls.fastq.gz">ONT Open Datasets</a>.
 
 ## Acknowledgements
-We would like to thank the developers of `samtools`, `minimap2`, `pysam`, `clair3`, `pepper-deepvariant`, `pysankey`, `igv`, and `swalign`. We would also like to thank GIAB and ONT for making their data available publicly.
+We would like to thank the developers of <a href="http://www.htslib.org">`samtools`</a>, <a href="https://github.com/lh3/minimap2">`minimap2`</a>, <a href="https://github.com/pysam-developers/pysam">`pysam`</a>, <a href="https://github.com/HKU-BAL/Clair3">`clair3`</a>, <a href="https://github.com/kishwarshafin/pepper">`pepper-deepvariant`</a>, <a href="https://github.com/anazalea/pySankey">`pysankey`</a>, <a href="https://software.broadinstitute.org/software/igv/">`igv`</a>, and <a href="https://github.com/mbreese/swalign">`swalign`</a>. We would also like to thank <a href="https://www.nist.gov/programs-projects/genome-bottle">GIAB</a> and <a href="https://nanoporetech.com">ONT</a> for making their data available publicly.
