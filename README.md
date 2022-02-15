@@ -65,8 +65,9 @@ For additional options, run `python3 realign.py --help`.
 `bed.py` | Module for computing n-polymer BED regions.
 `purity.py` | Module for computing a BAM pileup's Gini purity, for measuring read concordance.
 `filter.py` | Simple module for filtering overlapping variants.
+`cfg.py` | Contains global variables and configuration.
 
-All other files contain functions used in the above modules.
+All other `src/` files (`aln.pyx`, `bam.pyx`, `cig.pyx`, `vcf.py`, `util.py`) contain functions used in the above modules.
 
 `scripts/` | Helper scripts used during evaluation
 ---: | ---
@@ -92,9 +93,8 @@ All other files contain functions used in the above modules.
 ---: | ---
 
 ## Data Sources
-The GRCh38 human reference sequence was downloaded from <a href="s3://ont-open-data/gm24385_2020.09/config/ref/GCA_000001405.15_GRCh38_no_alt_analysis_set.fasta">ONT Open Datasets</a>.
 The Genome In A Bottle GRCh38 v4.1 ground truth VCF and benchmarking regions were downloaded from <a href="https://ftp-trace.ncbi.nlm.nih.gov/ReferenceSamples/giab/release/AshkenazimTrio/HG002_NA24385_son/NISTv4.1/GRCh38/">here</a>.
-R9.4.1 reads basecalled with the Guppy 5.0.6 super-accuracy model were downloaded from <a href="s3://ont-open-data/gm24385_2020.11/analysis/r9.4.1/20201026_1644_2-E5-H5_PAG07162_d7f262d5/guppy_v4.0.11_r9.4.1_hac_prom/align_unfiltered/chrN/guppy_v5.0.6_r9.4.1_sup_prom/basecalls.fastq.gz">ONT Open Datasets</a>.
+The GRCh38 human reference sequence and R9.4.1 reads basecalled with the Guppy 5.0.6 super-accuracy model were downloaded from <a href="https://registry.opendata.aws/ont-open-data/">ONT Open Datasets</a>.
 
 ## Acknowledgements
 We would like to thank the developers of <a href="http://www.htslib.org">`samtools`</a>, <a href="https://github.com/lh3/minimap2">`minimap2`</a>, <a href="https://github.com/pysam-developers/pysam">`pysam`</a>, <a href="https://github.com/HKU-BAL/Clair3">`clair3`</a>, <a href="https://github.com/kishwarshafin/pepper">`pepper-deepvariant`</a>, <a href="https://github.com/anazalea/pySankey">`pysankey`</a>, <a href="https://software.broadinstitute.org/software/igv/">`igv`</a>, and <a href="https://github.com/mbreese/swalign">`swalign`</a>. We would also like to thank <a href="https://www.nist.gov/programs-projects/genome-bottle">GIAB</a> and <a href="https://nanoporetech.com">ONT</a> for making their data available publicly.
