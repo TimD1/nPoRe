@@ -726,23 +726,18 @@ cpdef align(char[::1] full_ref, char[::1] full_seq, str cigar,
 
             op = ''
             if typ == LEN or typ == INS:   # each move is an insertion
-                for i in range(run):
-                    op += 'I' #if typ == INS else 'L'
-                a_row -= run
+                op += 'I' if typ == INS else 'L'
+                a_row -= 1
             elif typ == SHR or typ == DEL: # each move is a deletion
-                for i in range(run):
-                    op += 'D' #if typ == DEL else 'S'
-                a_col -= run
+                op += 'D' if typ == DEL else 'S'
+                a_col -= 1
             elif typ == MAT: # only sub if stay in same matrix
-                i = 0
-                while i < run:
-                    a_row -= 1
-                    a_col -= 1
-                    if ref[a_col-dels[brk]] == seq[a_row-inss[brk]]:
-                        op += '='
-                    else:
-                        op += 'X'
-                    i += 1
+                a_row -= 1
+                a_col -= 1
+                if ref[a_col-dels[brk]] == seq[a_row-inss[brk]]:
+                    op += '='
+                else:
+                    op += 'X'
             else:
                 print("ERROR: unknown alignment matrix type:", typ)
                 break
