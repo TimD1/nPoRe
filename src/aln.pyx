@@ -17,7 +17,6 @@ def fix_matrix_properties(scores, delta = 0.01):
 
     ns = scores.shape[0]
     l = scores.shape[1]
-    INF = 10000
 
     for n in range(ns):
 
@@ -59,6 +58,22 @@ def fix_matrix_properties(scores, delta = 0.01):
 
 
 
+def scores_to_diffs(np_scores):
+    np_diffs = np.zeros_like(np_scores)
+    ns = np_scores.shape[0]
+    l = np_scores.shape[1]
+    for n in range(ns):
+
+        for i in range(l):
+            for j in range(i+1, l):
+                np_diffs[n,i,j] = np_scores[n,i,j] - np_scores[n,i,j-1]
+        for i in range(l):
+            for j in range(i-1, -1, -1):
+                np_diffs[n,i,j] = np_scores[n,i,j] - np_scores[n,i,j+1]
+    return np_diffs
+
+
+
 def calc_score_matrices(subs, nps, inss, dels, eps=0.01):
 
     # calculate homopolymer scores matrix
@@ -71,6 +86,7 @@ def calc_score_matrices(subs, nps, inss, dels, eps=0.01):
                 frac = (count + eps) / (total + eps)
                 np_scores[n, ref_len, call_len] = -np.log(frac)
     np_scores = fix_matrix_properties(np_scores)
+    np_diffs = scores_to_diffs(np_scores)
 
     # calculate substitution scores matrix
     sub_scores = np.zeros((cfg.nbases,cfg.nbases), dtype=np.float32)
@@ -93,7 +109,7 @@ def calc_score_matrices(subs, nps, inss, dels, eps=0.01):
         frac = (dels[l] + eps) / (total + eps)
         del_scores[l] = -np.log(frac)
 
-    return sub_scores, np_scores, ins_scores, del_scores
+    return sub_scores, np_diffs, ins_scores, del_scores
 
 
 
@@ -429,7 +445,6 @@ cpdef align(char[::1] full_ref, char[::1] full_seq, str cigar,
 
     cdef int b_row, b_col, a_row, a_col, ref_idx, seq_idx, row, col
     cdef int b_top_row, b_top_col, b_left_row, b_left_col, b_diag_row, b_diag_col
-    cdef int b_runleft_row, b_runleft_col, b_runup_row, b_runup_col
     cdef int b_ndown_row, b_ndown_col, b_nright_row, b_nright_col
     cdef int run, typ, i, brk, next_brk, brk_idx, n, n_seq, end_idx
     cdef int[::1] l, l_idx, l_seq, l_idx_seq
@@ -621,11 +636,8 @@ cpdef align(char[::1] full_ref, char[::1] full_seq, str cigar,
                         else: # continue insertion
                             # get matrix position of ins start
                             run = <int>(matrix[LEN, b_row, b_col, RUN])
-                            b_runup_row = a_to_b_row(a_row-run, a_col, inss, dels, r) - brk
-                            b_runup_col = a_to_b_col(a_row-run, a_col, inss, dels, r)
-
-                            if run > 0 and a_row-run >= inss[brk] and b_runup_col < 2*r:
-                                val1 = matrix[MAT, b_runup_row, b_runup_col, VAL] + \
+                            if run > 0:
+                                val1 = matrix[LEN, b_row, b_col, VAL] + \
                                     np_score(n, l[n_idx], <int>(run/n)+1, np_scores, max_l)
                                 if val1 < matrix[LEN, b_ndown_row, b_ndown_col, VAL]:
                                     matrix[LEN, b_ndown_row, b_ndown_col, VAL] = val1
@@ -655,11 +667,8 @@ cpdef align(char[::1] full_ref, char[::1] full_seq, str cigar,
 
                         else: # continue deletion
                             run = <int>(matrix[SHR, b_row, b_col, RUN])
-                            b_runleft_row = a_to_b_row(a_row, a_col-run, inss, dels, r) - brk
-                            b_runleft_col = a_to_b_col(a_row, a_col-run, inss, dels, r)
-
-                            if run > 0 and a_col-run >= dels[brk] and b_runleft_col > 0:
-                                val1 = matrix[MAT, b_runleft_row, b_runleft_col, VAL] + \
+                            if run > 0:
+                                val1 = matrix[SHR, b_row, b_col, VAL] + \
                                     np_score(n, l[n_idx], <int>(-run/n)-1, np_scores, max_l)
                                 if val1 < matrix[SHR, b_nright_row, b_nright_col, VAL]:
                                     matrix[SHR, b_nright_row, b_nright_col, VAL] = val1
