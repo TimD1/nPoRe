@@ -419,17 +419,16 @@ cpdef align(char[::1] full_ref, char[::1] full_seq, str cigar,
     cdef int L_IDX = 1
     cdef int N = 2
 
-    cdef int dims = 3 # dimensions in matrix
+    cdef int dims = 2 # dimensions in matrix
     cdef int VAL = 0  # value (alignment score)
-    cdef int TYP = 1  # type (predecessor matrix dimension)
-    cdef int RUN = 2  # run length (for indels)
+    cdef int RUN = 1  # run length (for indels)
 
-    cdef int typs = 5 # types
-    cdef int MAT = 0  # match/substitution
-    cdef int INS = 1  # insertion
-    cdef int LEN = 2  # lengthen homopolymer
-    cdef int DEL = 3  # deletion
-    cdef int SHR = 4  # shorten homopolymer
+    cdef char typs = 5 # types
+    cdef char MAT = 0  # match/substitution
+    cdef char INS = 1  # insertion
+    cdef char LEN = 2  # lengthen homopolymer
+    cdef char DEL = 3  # deletion
+    cdef char SHR = 4  # shorten homopolymer
 
     cdef str aln = ''
     cdef str full_aln = ''
@@ -437,8 +436,15 @@ cpdef align(char[::1] full_ref, char[::1] full_seq, str cigar,
     # for alignment offset purposes, M -> DI. Breaks are sometimes shifted by 1, 
     # so that this DI doesn't cross the boundary of alignment chunks. 
     # As a result, we must increase the matrix buffer size. (hence max_b_rows+1)
+    ptrs_buf = np.zeros((max_b_rows+1, b_cols), dtype=np.uint8)
+    runs_buf = np.zeros((max_b_rows+1, b_cols), dtype=np.intc)
+    cdef char[:,::1] ptrs = ptrs_buf
+    cdef int[:,::1] runs = runs_buf
+
+    # TODO: reduce size, split up
     matrix_buf = np.zeros((typs, max_b_rows+1, b_cols, dims), dtype=np.float32)
     cdef float[:,:,:,::1] matrix = matrix_buf
+
     # max single-move penalty is < 10, so a path with this penalty will never 
     # be chosen. Still kept small enough so that len(seq)*INF < INT_MAX
     cdef int INF = 100
@@ -486,10 +492,8 @@ cpdef align(char[::1] full_ref, char[::1] full_seq, str cigar,
                         b_col == 0 or b_col == 2*r:
                     continue
                 matrix[LEN, b_row, b_col, VAL] = INF * (a_row-inss[brk] + a_col-dels[brk])
-                matrix[LEN, b_row, b_col, TYP] = MAT
                 matrix[LEN, b_row, b_col, RUN] = 0
                 matrix[SHR, b_row, b_col, VAL] = INF * (a_row-inss[brk] + a_col-dels[brk])
-                matrix[SHR, b_row, b_col, TYP] = MAT
                 matrix[SHR, b_row, b_col, RUN] = 0
 
         # calculate matrix chunk
@@ -517,8 +521,9 @@ cpdef align(char[::1] full_ref, char[::1] full_seq, str cigar,
                 elif b_col == 0 or b_col == 2*r:
                     for typ in range(typs):
                         matrix[typ, b_row, b_col, VAL] = INF * (b_row+1)
-                        matrix[typ, b_row, b_col, TYP] = MAT
                         matrix[typ, b_row, b_col, RUN] = 0
+                    ptrs[b_row, b_col] = MAT
+                    runs[b_row, b_col] = 0
                     continue
 
                 # get n-polymer info
@@ -539,12 +544,10 @@ cpdef align(char[::1] full_ref, char[::1] full_seq, str cigar,
                 # UPDATE INS MATRIX
                 if a_row == inss[brk]: # first row
                     matrix[INS, b_row, b_col, VAL] = INF * (a_col-dels[brk]+1)
-                    matrix[INS, b_row, b_col, TYP] = DEL
                     matrix[INS, b_row, b_col, RUN] = a_col - dels[brk]
                 else:
                     val1 = matrix[MAT, b_top_row, b_top_col, VAL] + indel_start
                     matrix[INS, b_row, b_col, VAL] = val1
-                    matrix[INS, b_row, b_col, TYP] = INS
                     matrix[INS, b_row, b_col, RUN] = 1
 
                     val2 = matrix[INS, b_top_row, b_top_col, VAL] + indel_extend
@@ -554,19 +557,16 @@ cpdef align(char[::1] full_ref, char[::1] full_seq, str cigar,
                         else:
                             run = <int>(matrix[INS, b_top_row, b_top_col, RUN]) + 1
                         matrix[INS, b_row, b_col, VAL] = val2
-                        matrix[INS, b_row, b_col, TYP] = INS
                         matrix[INS, b_row, b_col, RUN] = run
 
 
                 # UPDATE DEL MATRIX
                 if a_col == dels[brk]: # first col
                     matrix[DEL, b_row, b_col, VAL] = INF * (a_row-inss[brk]+1)
-                    matrix[DEL, b_row, b_col, TYP] = INS
                     matrix[DEL, b_row, b_col, RUN] = a_row - inss[brk]
                 else:
                     val1 = matrix[MAT, b_left_row, b_left_col, VAL] + indel_start
                     matrix[DEL, b_row, b_col, VAL] = val1
-                    matrix[DEL, b_row, b_col, TYP] = DEL
                     matrix[DEL, b_row, b_col, RUN] = 1
 
                     val2 = matrix[DEL, b_left_row, b_left_col, VAL] + indel_extend
@@ -576,22 +576,21 @@ cpdef align(char[::1] full_ref, char[::1] full_seq, str cigar,
                         else:
                             run = <int>(matrix[DEL, b_left_row, b_left_col, RUN]) + 1
                         matrix[DEL, b_row, b_col, VAL] = val2
-                        matrix[DEL, b_row, b_col, TYP] = DEL
                         matrix[DEL, b_row, b_col, RUN] = run
 
 
                 # UPDATE MAT MATRIX
                 if a_row > inss[brk] and a_col > dels[brk]: # can move diag
-                    if matrix[MAT, b_diag_row, b_diag_col, TYP] == MAT:
-                        run = <int>(matrix[MAT, b_diag_row, b_diag_col, RUN]) + 1
+                    if ptrs[b_diag_row, b_diag_col] == MAT:
+                        run = runs[b_diag_row, b_diag_col] + 1
                     else:
                         run = 1
                     val1 = matrix[MAT, b_diag_row, b_diag_col, VAL] + \
                             sub_scores[ seq[seq_idx], ref[ref_idx] ]
                     matrix[MAT, b_row, b_col, VAL] = val1
-                    matrix[MAT, b_row, b_col, TYP] = MAT
                     matrix[MAT, b_row, b_col, RUN] = run
-
+                    ptrs[b_row, b_col] = MAT
+                    runs[b_row, b_col] = run
                 else:
                     # ensure val1 isn't chosen
                     val1 = matrix[DEL, b_row, b_col, VAL] + INF
@@ -603,14 +602,14 @@ cpdef align(char[::1] full_ref, char[::1] full_seq, str cigar,
                         val1 = val2
                         run = <int>(matrix[typ, b_row, b_col, RUN])
                         matrix[MAT, b_row, b_col, VAL] = val2
-                        matrix[MAT, b_row, b_col, TYP] = typ
                         matrix[MAT, b_row, b_col, RUN] = run
+                        ptrs[b_row, b_col] = typ
+                        runs[b_row, b_col] = run
 
 
                 # UPDATE LEN MATRIX
                 if a_row == inss[brk]: # first row
                     matrix[LEN, b_row, b_col, VAL] = INF * (a_col-dels[brk])
-                    matrix[LEN, b_row, b_col, TYP] = DEL
                     matrix[LEN, b_row, b_col, RUN] = a_col - dels[brk]
 
                 # start insertion
@@ -630,7 +629,6 @@ cpdef align(char[::1] full_ref, char[::1] full_seq, str cigar,
                                     np_score(n, l[n_idx], 1, np_scores, max_l)
                             if val1 < matrix[LEN, b_ndown_row, b_ndown_col, VAL]:
                                 matrix[LEN, b_ndown_row, b_ndown_col, VAL] = val1
-                                matrix[LEN, b_ndown_row, b_ndown_col, TYP] = LEN
                                 matrix[LEN, b_ndown_row, b_ndown_col, RUN] = n
 
                         else: # continue insertion
@@ -641,14 +639,12 @@ cpdef align(char[::1] full_ref, char[::1] full_seq, str cigar,
                                     np_score(n, l[n_idx], <int>(run/n)+1, np_scores, max_l)
                                 if val1 < matrix[LEN, b_ndown_row, b_ndown_col, VAL]:
                                     matrix[LEN, b_ndown_row, b_ndown_col, VAL] = val1
-                                    matrix[LEN, b_ndown_row, b_ndown_col, TYP] = LEN
                                     matrix[LEN, b_ndown_row, b_ndown_col, RUN] = run + n
 
 
                 # UPDATE SHR MATRIX
                 if a_col == dels[brk]: # first col
                     matrix[SHR, b_row, b_col, VAL] = INF * (a_row-inss[brk])
-                    matrix[SHR, b_row, b_col, TYP] = INS
                     matrix[SHR, b_row, b_col, RUN] = a_row - inss[brk]
 
                 for n in range(1, max_n+1):
@@ -662,7 +658,6 @@ cpdef align(char[::1] full_ref, char[::1] full_seq, str cigar,
                                 np_score(n, l[n_idx], -1, np_scores, max_l)
                             if val1 < matrix[SHR, b_nright_row, b_nright_col, VAL]:
                                 matrix[SHR, b_nright_row, b_nright_col, VAL] = val1
-                                matrix[SHR, b_nright_row, b_nright_col, TYP] = SHR
                                 matrix[SHR, b_nright_row, b_nright_col, RUN] = n
 
                         else: # continue deletion
@@ -672,7 +667,6 @@ cpdef align(char[::1] full_ref, char[::1] full_seq, str cigar,
                                     np_score(n, l[n_idx], <int>(-run/n)-1, np_scores, max_l)
                                 if val1 < matrix[SHR, b_nright_row, b_nright_col, VAL]:
                                     matrix[SHR, b_nright_row, b_nright_col, VAL] = val1
-                                    matrix[SHR, b_nright_row, b_nright_col, TYP] = SHR
                                     matrix[SHR, b_nright_row, b_nright_col, RUN] = run + n
 
 
@@ -690,8 +684,8 @@ cpdef align(char[::1] full_ref, char[::1] full_seq, str cigar,
             b_row = a_to_b_row(a_row, a_col, inss, dels, r) - brk
             b_col = a_to_b_col(a_row, a_col, inss, dels, r)
             val = matrix[MAT, b_row, b_col, VAL]
-            typ = <int>(matrix[MAT, b_row, b_col, TYP])
-            run = <int>(matrix[MAT, b_row, b_col, RUN])
+            typ = ptrs[b_row, b_col]
+            run = runs[b_row, b_col]
 
             # if verbose: # do some error-checking
             path.append((MAT, a_row, a_col))
@@ -726,18 +720,23 @@ cpdef align(char[::1] full_ref, char[::1] full_seq, str cigar,
 
             op = ''
             if typ == LEN or typ == INS:   # each move is an insertion
-                op += 'I' if typ == INS else 'L'
-                a_row -= 1
+                for i in range(run):
+                    op += 'I' #if typ == INS else 'L'
+                a_row -= run
             elif typ == SHR or typ == DEL: # each move is a deletion
-                op += 'D' if typ == DEL else 'S'
-                a_col -= 1
+                for i in range(run):
+                    op += 'D' #if typ == DEL else 'S'
+                a_col -= run
             elif typ == MAT: # only sub if stay in same matrix
-                a_row -= 1
-                a_col -= 1
-                if ref[a_col-dels[brk]] == seq[a_row-inss[brk]]:
-                    op += '='
-                else:
-                    op += 'X'
+                i = 0
+                while i < run:
+                    a_row -= 1
+                    a_col -= 1
+                    if ref[a_col-dels[brk]] == seq[a_row-inss[brk]]:
+                        op += '='
+                    else:
+                        op += 'X'
+                    i += 1
             else:
                 print("ERROR: unknown alignment matrix type:", typ)
                 break
@@ -770,7 +769,7 @@ cpdef align(char[::1] full_ref, char[::1] full_seq, str cigar,
                     for a_col in range(dels[brk], dels[next_brk]+1):
                         b_row = a_to_b_row(a_row, a_col, inss, dels, r) - brk
                         b_col = a_to_b_col(a_row, a_col, inss, dels, r)
-                        op = ops[<int>(matrix[typ, b_row, b_col, TYP])]
+                        op = ops[ptrs[b_row, b_col]] if typ == MAT else " "
                         val = f"{<int>(matrix[typ, b_row, b_col, VAL]):04}"
                         if (typ, a_row, a_col) in path:
                             mark = '$'
@@ -780,7 +779,7 @@ cpdef align(char[::1] full_ref, char[::1] full_seq, str cigar,
                             mark = '.'
                         else:
                             mark = ' '
-                        run = <int>(matrix[typ, b_row, b_col, RUN])
+                        run = runs[b_row, b_col]
                         if run < 10:
                             s += "  " + str(run) + op + mark + val
                         else:
