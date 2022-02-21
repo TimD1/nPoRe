@@ -15,6 +15,7 @@ Please cite the following pre-print if you use `npore`:
 <a href=""><b>[bioRxiv]</b> nPoRe: n-Polymer Realigner for improved pileup variant calling</a>
 </summary>
 
+<pre>
 @article {dunn-npore,
     author = {Dunn, Tim and Blaauw, David and Das, Reetuparna and Narayanasamy, Satish},
     title = {nPoRe: n-Polymer Realigner for improved pileup variant calling},
@@ -26,6 +27,7 @@ Please cite the following pre-print if you use `npore`:
     eprint = {https://www.biorxiv.org/content/early/2022/02/18/2022.02.15.480561.full.pdf},
     journal = {bioRxiv}
 }
+</pre>
 </details>
 
 ## Contents
