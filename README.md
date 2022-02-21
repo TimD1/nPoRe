@@ -1,7 +1,7 @@
 # nPoRe: n-Polymer Realigner for improved pileup variant calling
 
 ## Introduction
-`npore` is a read realigner which recalculates each read's fine-grained alignment in order to more accurately align ``n-polymers'' such as homopolymers (n=1) and tandem repeats (2 &leq; n &leq; 6). In other words, given an input BAM, it adjusts each read's CIGAR string to more accurately model the most likely sequencing errors and actual variants. Traditional affine gap penalties are context-agnostic, and do not model the higher likelihood of INDELs in low-complexity regions (particularly n-polymers), leading to poor or inconsistent alignments. We find that `npore` improves pileup concordance across reads and results in slightly better variant calling performance.
+`npore` is a read realigner which recalculates each read's fine-grained alignment in order to more accurately align ''n-polymers'' such as homopolymers (n=1) and tandem repeats (2 &leq; n &leq; 6). In other words, given an input BAM, it adjusts each read's CIGAR string to more accurately model the most likely sequencing errors and actual variants. Traditional affine gap penalties are context-agnostic, and do not model the higher likelihood of INDELs in low-complexity regions (particularly n-polymers), leading to poor or inconsistent alignments. We find that `npore` improves pileup concordance across reads and results in slightly better variant calling performance.
 <div align="center">
 <img src="img/npore_pileup.png" width="720p" alt="npore vs minimap2 pileup comparison">
 </div>
@@ -15,7 +15,17 @@ Please cite the following pre-print if you use `npore`:
 <a href=""><b>[bioRxiv]</b> nPoRe: n-Polymer Realigner for improved pileup variant calling</a>
 </summary>
 
-Authors: Tim Dunn, David Blaauw, Reetuparna Das, Satish Narayansamy
+@article {dunn-npore,
+    author = {Dunn, Tim and Blaauw, David and Das, Reetuparna and Narayanasamy, Satish},
+    title = {nPoRe: n-Polymer Realigner for improved pileup variant calling},
+    elocation-id = {2022.02.15.480561},
+    year = {2022},
+    doi = {10.1101/2022.02.15.480561},
+    publisher = {Cold Spring Harbor Laboratory},
+    URL = {https://www.biorxiv.org/content/early/2022/02/18/2022.02.15.480561},
+    eprint = {https://www.biorxiv.org/content/early/2022/02/18/2022.02.15.480561.full.pdf},
+    journal = {bioRxiv}
+}
 </details>
 
 ## Contents
@@ -31,8 +41,7 @@ Authors: Tim Dunn, David Blaauw, Reetuparna Das, Satish Narayansamy
 Installation requires a working version of `virtualenv` and `python3`. Python packages in `requirements.txt` will be downloaded as part of the installation. Simply run:
 
 ```bash
-git clone https://github.com/TimD1/npore && cd npore
-make npore
+git clone https://github.com/TimD1/npore && cd npore && make
 ```
 
 This makefile will create a virtual environment, download the required packages, and build `npore`. After setup, run:
