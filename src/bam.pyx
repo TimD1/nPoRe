@@ -138,6 +138,8 @@ def create_header(outfile):
                    'CL': ' '.join(sys.argv)
                }]
              }
+    if os.path.dirname(outfile):
+        os.makedirs(os.path.dirname(outfile), exist_ok=True)
     fh = pysam.Samfile(outfile, 'w', header=header)
     fh.close()
 
@@ -165,12 +167,7 @@ def get_confusion_matrices():
         Otherwise, calculate them from the provided BAM.
     '''
 
-    if not cfg.args.recalc_cms and \
-            os.path.isfile(f'{cfg.args.stats_dir}/subs_cm.npy') and \
-            os.path.isfile(f'{cfg.args.stats_dir}/nps_cm.npy') and \
-            os.path.isfile(f'{cfg.args.stats_dir}/inss_cm.npy') and \
-            os.path.isfile(f'{cfg.args.stats_dir}/dels_cm.npy'):
-
+    if not cfg.args.recalc_cms:
         print("> loading confusion matrices")
         return np.load(f'{cfg.args.stats_dir}/subs_cm.npy'), \
                 np.load(f'{cfg.args.stats_dir}/nps_cm.npy'), \

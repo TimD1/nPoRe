@@ -77,12 +77,11 @@ def main():
     print("> selecting BAM regions")
     get_bam_regions()
 
-    if cfg.args.recalc_cms:
-        print("> reading reference")
-        cfg.args.refs = {}
-        for ctg, _, _ in cfg.args.regions:
-            if ctg not in cfg.args.refs.keys():
-                cfg.args.refs[ctg] = get_fasta(cfg.args.ref, ctg)
+    print("> reading reference")
+    cfg.args.refs = {}
+    for ctg, _, _ in cfg.args.regions:
+        if ctg not in cfg.args.refs.keys():
+            cfg.args.refs[ctg] = get_fasta(cfg.args.ref, ctg)
 
     # loading confusion matrices
     os.makedirs(cfg.args.stats_dir, exist_ok=True)
@@ -119,6 +118,13 @@ def main():
 if __name__ == "__main__":
     parser = argparser()
     cfg.args = parser.parse_args()
+
+    # if all stats not available, recalculate cms
+    if not (os.path.isfile(f'{cfg.args.stats_dir}/subs_cm.npy') and \
+            os.path.isfile(f'{cfg.args.stats_dir}/nps_cm.npy') and \
+            os.path.isfile(f'{cfg.args.stats_dir}/inss_cm.npy') and \
+            os.path.isfile(f'{cfg.args.stats_dir}/dels_cm.npy')):
+        cfg.args.recalc_cms = True
 
     try:
         main()

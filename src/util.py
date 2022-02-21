@@ -28,6 +28,10 @@ def get_bam_regions():
 
     # just align selected region
     if cfg.args.contig:
+        if cfg.args.contig not in ref.references:
+            print(f"ERROR: contig '{cfg.args.contig}' not present in '{cfg.args.ref}'. "
+                    f"Valid contigs are: {ref.references}")
+            exit(1)
         if cfg.args.contigs:
             print("\nERROR: can't set 'contig' and 'contigs'.")
             exit(1)
@@ -36,8 +40,9 @@ def get_bam_regions():
         if not cfg.args.contig_end:
             cfg.args.contig_end = \
                     ref.get_reference_length(cfg.args.contig)-1
+        max_end = ref.get_reference_length(cfg.args.contig)-1
         cfg.args.regions = [(cfg.args.contig, 
-                cfg.args.contig_beg, cfg.args.contig_end)]
+                cfg.args.contig_beg, min(max_end, cfg.args.contig_end))]
 
     # add several contigs
     elif cfg.args.contigs:
@@ -46,6 +51,10 @@ def get_bam_regions():
             exit(1)
         cfg.args.regions = []
         for contig in cfg.args.contigs.split(','):
+            if contig not in ref.references:
+                print(f"ERROR: contig '{contig}' not present in '{cfg.args.ref}'. "
+                    f"Valid contigs are: {ref.references}")
+                exit(1)
             end = ref.get_reference_length(contig)-1
             cfg.args.regions.append((contig, 0, end))
 
