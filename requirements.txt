@@ -3,5 +3,4 @@ numpy
 cython
 matplotlib
 biopython
-pandas
 psutil
