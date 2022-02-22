@@ -51,7 +51,7 @@ def argparser():
             help="Maximum length (number of times a repeated sequence occurs)"
             " considered during read realignment.")
     parser.add_argument("--chunk_width", type=int, default=100000,
-            help="BAM is considered in chunks of size '--chunk_width' at a time "
+            help="BAM is considered in chunks of size '--chunk_width' "
             "when calculating confusion matrices.")
 
     # path
@@ -78,10 +78,11 @@ def main():
     get_bam_regions()
 
     print("> reading reference")
-    cfg.args.refs = {}
-    for ctg, _, _ in cfg.args.regions:
-        if ctg not in cfg.args.refs.keys():
-            cfg.args.refs[ctg] = get_fasta(cfg.args.ref, ctg)
+    if cfg.args.recalc_cms:
+        cfg.args.refs = {}
+        for ctg, _, _ in cfg.args.regions:
+            if ctg not in cfg.args.refs.keys():
+                cfg.args.refs[ctg] = get_fasta(cfg.args.ref, ctg)
 
     # loading confusion matrices
     os.makedirs(cfg.args.stats_dir, exist_ok=True)

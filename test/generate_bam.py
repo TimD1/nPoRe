@@ -32,7 +32,7 @@ def collapse_cigar(extended_cigar, return_groups=False):
 
 
 reflen = 1000
-nreads = 1000
+nreads = 10
 readlen_min = 300
 readlen_max = 700
 

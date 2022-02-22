@@ -19,12 +19,12 @@ def get_bam_regions():
     try:
         ref = pysam.FastaFile(cfg.args.ref)
     except (AttributeError, IOError, ValueError):
-        print(f"\nERROR: could not open 'cfg.args.ref' FASTA.")
+        print(f"\nERROR: could not open --ref FASTA '{cfg.args.ref}'.")
         exit(1)
     try:
         bam = pysam.AlignmentFile(cfg.args.bam)
     except (AttributeError, IOError, ValueError):
-        print(f"WARNING: could not open 'cfg.args.bam' BAM. ")
+        print(f"WARNING: could not open --bam BAM '{cfg.args.bam}'. ")
 
     # just align selected region
     if cfg.args.contig:

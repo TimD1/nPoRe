@@ -40,10 +40,12 @@ Please cite the following pre-print if you use `npore`:
 * [Acknowledgements](#acknowledgements)
 
 ## Installation
+
+#### Option 1: GitHub Source
 Installation requires a working version of `virtualenv` and `python3`. Python packages in `requirements.txt` will be downloaded as part of the installation. Simply run:
 
 ```bash
-git clone https://github.com/TimD1/npore && cd npore && make
+$ git clone https://github.com/TimD1/npore && cd npore && make
 ```
 
 This makefile will create a virtual environment, download the required packages, and build `npore`. After setup, run:
@@ -55,18 +57,54 @@ python3 ./src/realign.py --help
 
 to verify the setup has succeeded.
 
+#### Option 2: Docker Hub Image
+A pre-built Docker image can be downloaded from <a href="https://hub.docker.com/r/timd1/npore">here</a> using:
+```bash
+sudo docker pull timd1/npore
+sudo docker run -it timd1/npore:latest python3 realign.py --help
+```
+
+
+#### Option 3: Dockerfile
+This may take some time to re-build the image; the previous option should be preferred in most cases.
+```bash
+git clone https://github.com/TimD1/npore && cd npore
+sudo docker build -f ./Dockerfile -t timd1/npore:latest .
+sudo docker run -it timd1/npore:latest python3 realign.py --help
+```
+
 ## Usage
+
+#### Option 1: GitHub Source
 Here's an example usage of the main `realign.py` program, which will store results in `realigned.sam`.
 
 ```bash
-python3 ~/npore/src/realign.py \
-    --bam reads.bam \
-    --ref ref.fasta \
-    --out_prefix realigned \
-    --contigs chr20,chr21,chr22 \
-    --stats_dir ~/npore/guppy5_stats
+export NPORE="$HOME/npore"
+export DATA="$NPORE/test/data"
+. $NPORE/venv3/bin/activate
+python3 $NPORE/src/realign.py \
+    --bam $DATA/reads.bam \
+    --ref $DATA/ref.fasta \
+    --out_prefix $DATA/realigned \
+    --stats_dir $NPORE/guppy5_stats
 ```
 For additional options, run `python3 realign.py --help`.
+
+#### Option 2: Docker
+Here's how to call the Docker container with the same arguments as above:
+```bash
+export NPORE="$HOME/npore"
+export DATA="$NPORE/test/data"
+sudo docker run \
+    -v $DATA:$DATA \
+    -v $NPORE/guppy5_stats:$NPORE/guppy5_stats \
+    timd1/npore:v0.1.0 \
+        python3 realign.py \
+        --bam $DATA/reads.bam \
+        --ref $DATA/ref.fasta \
+        --out_prefix $DATA/realigned \
+        --stats_dir $NPORE/guppy5_stats
+```
 
 ## Project Structure
 `src/` | nPoRe source code
