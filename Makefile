@@ -2,7 +2,7 @@
 npore:
 	test -d venv3 || (python3 -m venv venv3 --prompt "npore" && \
 		/bin/bash -c "source ./venv3/bin/activate" && \
-		python3 -m pip install -r requirements.txt && deactivate)
+		python3 -m pip install -r requirements.txt)
 	/bin/bash -c "source ./venv3/bin/activate"
 	python3 setup.py build_ext --inplace
 	mv *.so src/
