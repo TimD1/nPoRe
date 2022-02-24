@@ -1,5 +1,7 @@
 # nPoRe: n-Polymer Realigner for improved pileup variant calling
 
+[![DOI](https://zenodo.org/badge/365294513.svg)](https://zenodo.org/badge/latestdoi/365294513)
+
 ## Introduction
 `npore` is a read realigner which recalculates each read's fine-grained alignment in order to more accurately align ''n-polymers'' such as homopolymers (n=1) and tandem repeats (2 &leq; n &leq; 6). In other words, given an input BAM, it adjusts each read's CIGAR string to more accurately model the most likely sequencing errors and actual variants. Traditional affine gap penalties are context-agnostic, and do not model the higher likelihood of INDELs in low-complexity regions (particularly n-polymers), leading to poor or inconsistent alignments. We find that `npore` improves pileup concordance across reads and results in slightly better variant calling performance.
 <div align="center">
