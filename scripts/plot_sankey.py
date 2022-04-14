@@ -181,38 +181,72 @@ def error_pie(data, suffix=""):
 def plot_sankey(all_data, np_data=None, np_sizes=None):
 
     # sankey 0
-    left0 = ["Substitutions"]*3 + ["Insertions"]*3 + ["Deletions"]*3 + ["Complex"]*3
-    right0 = ["True Positive", "False Negative", "False Positive"] * 4
-    weight0 = all_data.types.flatten() / np.sum(all_data.types)
-
-    # sankey 1
-    left1 = ["True Positive", "False Negative", "False Positive"]
-    right1 = ["True Positive", "False Negative", "False Positive"]
-    leftweight1 = np.sum(all_data.types, axis=0) / np.sum(all_data.types)
-    rightweight1 = [ 
-            0, 
-            np.sum(all_data.types[:,FN])/np.sum(all_data.types[:,1:]),
-            np.sum(all_data.types[:,FP])/np.sum(all_data.types[:,1:])
-    ]
-
-    # sankey 2
-    left2 = ["False Negative"]*(cfg.args.max_n+1) + \
-            ["False Positive"]*(cfg.args.max_n+1)
-    right2 = (["Other"] + [f"{i}-Polymer" for i in range(1, cfg.args.max_n+1)])* 2
-    total = np.sum([x.types[:,1:] for x in np_data])
-    weight2 = [np.sum(np_data[i].types[:,FN]) / total \
-                    for i in range(cfg.args.max_n+1)] + \
-            [np.sum(np_data[i].types[:,FP]) / total \
-                    for i in range(cfg.args.max_n+1)]
-
-    # sankey 3
-    label3 = ["Other"] + [f"{i}-Polymer" for i in range(1, cfg.args.max_n+1)]
+    label0 = ["Other"] + [f"{i}-Polymer" for i in range(1, cfg.args.max_n+1)]
+    total_size = sum([np_sizes[f"np_{i}"] for i in range(cfg.args.max_n+1)])
+    leftweight0 = [np_sizes[f"np_{i}"]/total_size for i in range(cfg.args.max_n+1)]
     total_errors = sum([np.sum(np_data[i].types[:,1:]) \
             for i in range(cfg.args.max_n+1)])
-    leftweight3 = [np.sum(np_data[i].types[:,1:])/total_errors \
+    rightweight0 = [np.sum(np_data[i].types[:,1:])/total_errors \
             for i in range(cfg.args.max_n+1)]
-    total_size = sum([np_sizes[f"np_{i}"] for i in range(cfg.args.max_n+1)])
-    rightweight3 = [np_sizes[f"np_{i}"]/total_size for i in range(cfg.args.max_n+1)]
+
+    # sankey 1
+    left1 = (["Other"] + [f"{i}-Polymer" for i in range(1, cfg.args.max_n+1)])* 4
+    right1 = ["Substitutions"]*7 + ["Insertions"]*7 + ["Deletions"]*7 + ["Complex"]*7
+    total = np.sum([x.types[:,1:] for x in np_data])
+    weight1 = []
+    for error_type in range(4):
+        for np_idx in range(cfg.args.max_n+1):
+            weight1.append(sum(np_data[np_idx].types[error_type,1:])/total)
+
+    bottom_labels = [
+            "Relative\nRegion Sizes",
+            "Errors\nby Region",
+            "Variant Call\nError Types",
+            ]
+    sankey(
+            lefts = [label0, left1],
+            rights = [label0, right1],
+            colors = cfg.args.colors,
+            leftWeights = [leftweight0, weight1],
+            rightWeights = [rightweight0, weight1],
+            rightColors = [False, True],
+            gaps = [False, False],
+            bottoms = bottom_labels,
+            fontsize = 12,
+            figureName = "img/sankey1",
+    )
+
+
+    # # sankey 2
+    # left2 = ["True Positive"]*(cfg.args.max_n+1) + \
+    #         ["False Negative"]*(cfg.args.max_n+1) + \
+    #         ["False Positive"]*(cfg.args.max_n+1)
+    # right2 = (["Other"] + [f"{i}-Polymer" for i in range(1, cfg.args.max_n+1)])* 3
+    # total = np.sum([x.types[:,:] for x in np_data])
+    # leftweight2 = [np.sum(np_data[i].types[:,TP]) / total \
+    #                 for i in range(cfg.args.max_n+1)] + \
+    #         [np.sum(np_data[i].types[:,FN]) / total \
+    #                 for i in range(cfg.args.max_n+1)] + \
+    #         [np.sum(np_data[i].types[:,FP]) / total \
+    #                 for i in range(cfg.args.max_n+1)]
+
+    # total = np.sum([x.types[:,1:] for x in np_data])
+    # rightweight2 = [0]*(cfg.args.max_n+1) + [np.sum(np_data[i].types[:,FN]) / total \
+    #                 for i in range(cfg.args.max_n+1)] + \
+    #         [np.sum(np_data[i].types[:,FP]) / total \
+    #                 for i in range(cfg.args.max_n+1)]
+
+    # # sankey 3
+    # label3 = ["Other"] + [f"{i}-Polymer" for i in range(1, cfg.args.max_n+1)]
+    # total_errors = sum([np.sum(np_data[i].types[:,1:]) \
+    #         for i in range(cfg.args.max_n+1)])
+    # leftweight3 = [np.sum(np_data[i].types[:,1:])/total_errors \
+    #         for i in range(cfg.args.max_n+1)]
+    # total_size = sum([np_sizes[f"np_{i}"] for i in range(cfg.args.max_n+1)])
+    # rightweight3 = [np_sizes[f"np_{i}"]/total_size for i in range(cfg.args.max_n+1)]
+
+
+################################################################################
 
     # sankey 4
     label4 = ["Other"] + [f"{i}-Polymer" for i in range(1, cfg.args.max_n+1)]
@@ -227,32 +261,26 @@ def plot_sankey(all_data, np_data=None, np_sizes=None):
     # sankey 5
     left5 = ["Other"]*2 + [f"{n}-Polymer" for i in 
             range(1, cfg.args.max_n+1) for n in [i,i]]
-    right5 = ["General INDEL", "Copy Number Variant"]*(cfg.args.max_n+1)
+    right5 = ["General INDEL", "Copy Number INDEL"]*(cfg.args.max_n+1)
     total = np.sum( [x.cnvs[:] for x in np_data] )
     weight5 = [w / total for i in range(cfg.args.max_n+1) for w in np_data[i].cnvs]
 
     bottom_labels = [
-            "Variant Call\nTypes",
-            "Variant Call\nCorrectness",
-            "Variant Call\nErrors",
-            "Errors\nby Region",
             "Relative\nRegion Sizes",
             "True INDELs\nby Region",
             "True INDEL\nVariant Types"
             ]
     sankey(
-            lefts = [left0, left1, left2, label3, label4, left5],
-            rights = [right0, right1, right2, label3, label4, right5],
+            lefts = [label4, left5],
+            rights = [label4, right5],
             colors = cfg.args.colors,
-            leftWeights = [weight0, leftweight1, weight2, leftweight3, 
-                leftweight4, weight5],
-            rightWeights = [weight0, rightweight1, weight2, rightweight3, 
-                rightweight4, weight5],
-            rightColors = [True, False, False, False, False, True],
-            gaps = [False, False, False, False, True, False],
+            leftWeights = [leftweight4, weight5],
+            rightWeights = [rightweight4, weight5],
+            rightColors = [False, True],
+            gaps = [False, False],
             bottoms = bottom_labels,
             fontsize = 12,
-            figureName = "img/sankey",
+            figureName = "img/sankey2",
     )
 
 
@@ -350,12 +378,12 @@ def argparser():
 
 def set_colors():
     cfg.args.colors = {
-        'Substitutions':'#1b7ef7',
+        'Substitutions':'#f78c1b',
         'General INDEL':'#1b7ef7',
-        'Copy Number Variant':'#9912c9',
+        'Copy Number INDEL':'#9912c9',
         'Insertions':'#9bd937',
         'Deletions':'#f71b1b',
-        'Complex':'#9912c9',
+        'Complex':'#ffff66',
         'False Negative':'#f71b1b',
         'True Positive':'#12e23f',
         'False Positive':'#f78c1b',

@@ -126,10 +126,10 @@ def sankey(lefts, rights, colors, leftWeights=None, rightWeights=None,
 
         # Draw vertical bars on left and right of each  label's section & print label
         for leftLabel in leftLabels:
-            if leftWidths[leftLabel]['left']: # skip if weight is zero
+            if leftWidths[leftLabel]['left'] and rightWidths[rightLabel]['right']: # skip if weight is zero
                 if gaps[idx]:
                     plt.fill_between(
-                        [idx-3*bar_width, idx-bar_width],
+                        [idx-7*bar_width, idx-5*bar_width],
                         2 * [leftWidths[leftLabel]['bottom']],
                         2 * [leftWidths[leftLabel]['bottom'] + leftWidths[leftLabel]['left']],
                         color=colors[leftLabel],
@@ -137,7 +137,7 @@ def sankey(lefts, rights, colors, leftWeights=None, rightWeights=None,
                         linewidth=0,
                     )
                     plt.fill_between(
-                        [idx+bar_width, idx+3*bar_width],
+                        [idx+5*bar_width, idx+7*bar_width],
                         2 * [leftWidths[leftLabel]['bottom']],
                         2 * [leftWidths[leftLabel]['bottom'] + leftWidths[leftLabel]['left']],
                         color=colors[leftLabel],
@@ -212,9 +212,9 @@ def sankey(lefts, rights, colors, leftWeights=None, rightWeights=None,
                         start = idx+bar_width
                         end = idx+1-bar_width
                         if gaps[idx]:
-                            start = idx + 3*bar_width
+                            start = idx + 7*bar_width
                         if idx < n-1 and gaps[idx+1]:
-                            end = idx+1 - 3*bar_width
+                            end = idx+1 - 7*bar_width
 
                         plt.fill_between(
                             np.linspace(start, end, \
