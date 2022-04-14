@@ -60,26 +60,12 @@ def realign_read(read_data):
     int_seq = bases_to_int(seq)
     cigar = align(int_ref, int_seq, cigar, cfg.args.sub_scores, cfg.args.np_scores)
 
-    ### STANDARDIZE ###
-    cigar = cigar.replace('X', 'M').replace('=','M')
-    cig_len = len(cigar)
-    nshifts_buf = np.zeros(cig_len, dtype = np.uint8)
-    shiftlen_buf = np.zeros(cig_len, dtype = np.uint8)
-    int_cig = cig_to_int(cigar)
-    while True:
-        old_cig = int_cig[:]
-        I, D = 1, 2
-        int_cig = push_indels_left(int_cig, int_ref, nshifts_buf, shiftlen_buf, D)
-        int_cig = push_inss_thru_dels(int_cig)
-        int_cig = push_indels_left(int_cig, int_seq, nshifts_buf, shiftlen_buf, I)
-        int_cig = push_inss_thru_dels(int_cig)
-        if same_cigar(old_cig, int_cig): break
-    cigar = int_to_cig(int_cig).replace('ID','M')
-
     ### WRITE ###
     with cfg.counter.get_lock():
         out_bam_fh = open(f'{cfg.args.out_prefix}.sam', 'a')
-        print(f"{read_id}\t{flag}\t{ref_name}\t{start+1}\t{mapq}\t{collapse_cigar(cigar)}\t*\t0\t{stop-start}\t{seq}\t{quals}\tHP:i:{hap}", file=out_bam_fh)
+        print(f"{read_id}\t{flag}\t{ref_name}\t{start+1}\t{mapq}"
+                f"\t{collapse_cigar(cigar)}\t*\t0\t{stop-start}\t{seq}"
+                f"\t{quals}\tHP:i:{hap}", file=out_bam_fh)
         out_bam_fh.close()
 
     # free unused RAM
@@ -92,30 +78,12 @@ def realign_read(read_data):
 def realign_hap(hap_data):
     '''
     Re-align reads using better estimates of SNP frequencies in new alignment
-    algorithm, taking n-polymer indels into account.
+    algorithm, taking n-polymer indels into account. Return data, not print.
     '''
-    ### ALIGN ###
     contig, hap, seq, ref, cigar = hap_data
     int_ref = bases_to_int(ref)
     int_seq = bases_to_int(seq)
     cigar = align(int_ref, int_seq, cigar, cfg.args.sub_scores, cfg.args.np_scores)
-
-    ### STANDARDIZE ###
-    cigar = cigar.replace('X', 'M').replace('=','M')
-    cig_len = len(cigar)
-    nshifts_buf = np.zeros(cig_len, dtype = np.uint8)
-    shiftlen_buf = np.zeros(cig_len, dtype = np.uint8)
-    int_cig = cig_to_int(cigar)
-    while True:
-        old_cig = int_cig[:]
-        I, D = 1, 2
-        int_cig = push_indels_left(int_cig, int_ref, nshifts_buf, shiftlen_buf, D)
-        int_cig = push_inss_thru_dels(int_cig)
-        int_cig = push_indels_left(int_cig, int_seq, nshifts_buf, shiftlen_buf, I)
-        int_cig = push_inss_thru_dels(int_cig)
-        if same_cigar(old_cig, int_cig): break
-    cigar = int_to_cig(int_cig).replace('ID','M')
-
     with cfg.counter.get_lock():
         cfg.counter.value += 1
         print(f"\r    {cfg.counter.value} reads processed.", end='', flush=True)
