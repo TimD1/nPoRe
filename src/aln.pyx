@@ -292,38 +292,72 @@ cdef float np_score(int n, int ref_np_len, int indel_len, float[:,:,::1] np_scor
 
 @cython.boundscheck(False)
 @cython.wraparound(False)
-cdef int[::1] get_inss(str cigar):
-    ''' CIGAR must contain only "I" and "D". '''
+cdef int[::1] get_inss(char[::1] cigar_ops, int[::1] cigar_counts):
+    ''' Calculate align() matrix offsets based on CIGAR data. '''
 
-    cdef int cig_len = len(cigar)
-    inss_buf = np.zeros(cig_len+1, dtype=np.intc)
-    cdef int[::1] inss = inss_buf
+    # calculate length of inss array
+    cdef int cig_len = len(cigar_ops)
     cdef int i
-
+    cdef int inss_len = 0
     for i in range(cig_len):
-        if cigar[i] == 'I':
-            inss[i+1] = inss[i] + 1
-        else:
-            inss[i+1] = inss[i]
+        if cigar_ops[i] == 1 or cigar_ops[i] == 2: # I/D
+            inss_len += cigar_counts[i]
+        elif cigar_ops[i] == 0 or cigar_ops[i] == 7 or cigar_ops[i] == 8: # M/=/X
+            inss_len += cigar_counts[i] * 2 # converted to I+D
+        # else ignore S/H
+
+    # populate inss array
+    inss_buf = np.zeros(inss_len+1, dtype=np.intc)
+    cdef int[::1] inss = inss_buf
+    cdef int pos = 0
+    for i in range(cig_len):
+        for j in range(cigar_counts[i]):
+            if cigar_ops[i] == 1: # I
+                inss[pos+1] = inss[pos]+1
+                pos += 1
+            elif cigar_ops[i] == 2: # D
+                inss[pos+1] = inss[pos]
+                pos += 1
+            elif cigar_ops[i] == 0 or cigar_ops[i] == 7 or cigar_ops[i] == 8: # M/=/X
+                inss[pos+1] = inss[pos]+1 # I
+                inss[pos+2] = inss[pos]+1 # D
+                pos += 2
     return inss
 
 
 
 @cython.boundscheck(False)
 @cython.wraparound(False)
-cdef int[::1] get_dels(str cigar):
-    ''' CIGAR must contain only "I" and "D". '''
+cdef int[::1] get_dels(char[::1] cigar_ops, int[::1] cigar_counts):
+    ''' Calculate align() matrix offsets based on CIGAR data. '''
 
-    cdef int cig_len = len(cigar)
-    dels_buf = np.zeros(cig_len+1, dtype=np.intc)
-    cdef int[::1] dels = dels_buf
+    # calculate length of dels array
+    cdef int cig_len = len(cigar_ops)
     cdef int i
-
+    cdef int dels_len = 0
     for i in range(cig_len):
-        if cigar[i] == 'D':
-            dels[i+1] = dels[i] + 1
-        else:
-            dels[i+1] = dels[i]
+        if cigar_ops[i] == 1 or cigar_ops[i] == 2: # I/D
+            dels_len += cigar_counts[i]
+        elif cigar_ops[i] == 0 or cigar_ops[i] == 7 or cigar_ops[i] == 8: # M/=/X
+            dels_len += cigar_counts[i] * 2 # converted to I+D
+        # else ignore S/H
+
+    # populate dels array
+    dels_buf = np.zeros(dels_len+1, dtype=np.intc)
+    cdef int[::1] dels = dels_buf
+    cdef int pos = 0
+    for i in range(cig_len):
+        for j in range(cigar_counts[i]):
+            if cigar_ops[i] == 1: # I
+                dels[pos+1] = dels[pos]
+                pos += 1
+            elif cigar_ops[i] == 2: # D
+                dels[pos+1] = dels[pos]+1
+                pos += 1
+            elif cigar_ops[i] == 0 or cigar_ops[i] == 7 or cigar_ops[i] == 8: # M/=/X
+                dels[pos+1] = dels[pos]   # I
+                dels[pos+2] = dels[pos]+1 # D
+                pos += 2
     return dels
 
 
@@ -392,18 +426,16 @@ cdef int match(char[::1] A, char[::1] B):
 @cython.boundscheck(False)
 @cython.wraparound(False)
 @cython.cdivision(True)
-cpdef align(char[::1] full_ref, char[::1] full_seq, str cigar, 
+cpdef align(char[::1] full_ref, char[::1] full_seq, 
+        char[::1] cigar_ops, int[::1] cigar_cts,
         float[:,::1] sub_scores, float[:,:,::1] np_scores, 
         float indel_start=5, float indel_extend=1, int max_b_rows = 20000,
         int r = 30, int verbose=0):
     ''' Perform alignment.  '''
 
-    # convert CIGAR so that each movement is row+1 or col+1, enables easy banding
-    cigar = cigar.replace('X','DI').replace('=','DI').replace('M','DI')
-
     # precompute offsets, breakpoints, and homopolymers
-    cdef int[::1] inss = get_inss(cigar)
-    cdef int[::1] dels = get_dels(cigar)
+    cdef int[::1] inss = get_inss(cigar_ops, cigar_cts)
+    cdef int[::1] dels = get_dels(cigar_ops, cigar_cts)
     cdef int[::1] breaks = get_breaks(max_b_rows, 
             len(full_seq) + len(full_ref) + 1, inss, dels)
     cdef int[:,:,::1] np_info, np_info_seq
@@ -788,58 +820,6 @@ cpdef align(char[::1] full_ref, char[::1] full_seq, str cigar,
             print(" ")
 
     return full_aln
-
-
-
-def dump(ref, seq, cigar):
-    ''' Pretty print full alignment result. '''
-
-    ref_str = ''
-    cig_str = ''
-    seq_str = ''
-
-    ref_idx = 0
-    seq_idx = 0
-
-    for idx, op in enumerate(cigar):
-        if op == '=' or op == 'M':
-            ref_str += ref[ref_idx]
-            ref_idx += 1
-            seq_str += seq[seq_idx]
-            seq_idx += 1
-            cig_str += '|'
-
-        elif op == 'X':
-            ref_str += ref[ref_idx]
-            ref_idx += 1
-            seq_str += seq[seq_idx]
-            seq_idx += 1
-            cig_str += 'X'
-
-        elif op == 'D' or op == 'S':
-            ref_str += ref[ref_idx]
-            ref_idx += 1
-            seq_str += '-'
-            cig_str += ' '
-
-        elif op == 'I' or op == 'L':
-            ref_str += '-'
-            seq_str += seq[seq_idx]
-            seq_idx += 1
-            cig_str += ' '
-
-        else:
-            print(f"ERROR: unrecognized CIGAR operation '{op}' at cigar index {len(cig_str)}.")
-
-    print(f"REF: len: {len(ref)} ciglen: {sum([op in 'XD=M' for op in cigar])}\n"
-          f"SEQ: len: {len(seq)} ciglen: {sum([op in 'SXI=M' for op in cigar])}\n"
-          f"Cigar: {cigar}\n\n")
-
-    for x in range(0, len(cig_str), 80):
-        print(ref_str[x : x+80])
-        print(cig_str[x : x+80])
-        print(seq_str[x : x+80])
-        print(' ')
 
 
 

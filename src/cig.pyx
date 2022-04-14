@@ -39,25 +39,6 @@ def collapse_cigar(extended_cigar, return_groups=False):
 
 
 
-def expand_cigar(cigar):
-    ''' 
-    Converts CIGAR string to list of ops. 
-    '1D3M2I' -> 'DMMMII'
-    '''
-
-    cigar_str = ''
-    count = 0
-
-    for char in cigar:
-        if char in '0123456789':
-            count = count * 10 + ord(char) - ord('0')
-        else:
-            cigar_str += count * char
-            count = 0
-    return cigar_str
-
-
-
 class Cigar():
     ''' Enum for pysam's cigartuples encoding.  '''
     M = 0
@@ -93,6 +74,7 @@ cpdef char[::1] bases_to_int(str seq):
     cdef long long seqlen = len(seq)
     int_seq_buf = np.zeros(seqlen, dtype=np.uint8)
     cdef char[::1] int_seq = int_seq_buf
+    cdef long long i
     for i in range(seqlen):
         if seq[i] == 'N':
             int_seq[i] = 0

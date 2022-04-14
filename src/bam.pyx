@@ -37,7 +37,7 @@ def get_read_data(bam_fn):
                     read.reference_name,
                     read.reference_start,
                     read.mapping_quality,
-                    read.cigarstring,
+                    read.cigartuples,
                     read.reference_start + read.reference_length,
                     read.query_alignment_sequence.upper(),
                     ''.join([chr(33+x) for x in read.query_alignment_qualities]),
@@ -47,7 +47,7 @@ def get_read_data(bam_fn):
 
 
 
-def realign_read(read_data):
+cpdef realign_read(read_data):
     '''
     Re-align reads using better estimates of SNP frequencies in new alignment
     algorithm, taking n-polymer indels into account.
@@ -55,10 +55,12 @@ def realign_read(read_data):
     ### ALIGN ###
     read_id, flag, ref_name, start, mapq, cigar, stop, seq, quals, ref, hap = \
             read_data
-    cigar = expand_cigar(cigar).replace('S','').replace('H','')
+    int_cigops = np.array([c[0] for c in cigar], dtype=np.uint8)
+    int_cigcts = np.array([c[1] for c in cigar], dtype=np.intc)
     int_ref = bases_to_int(ref)
     int_seq = bases_to_int(seq)
-    cigar = align(int_ref, int_seq, cigar, cfg.args.sub_scores, cfg.args.np_scores)
+    cigar = align(int_ref, int_seq, int_cigops, int_cigcts, 
+            cfg.args.sub_scores, cfg.args.np_scores)
 
     ### WRITE ###
     with cfg.counter.get_lock():
@@ -69,7 +71,7 @@ def realign_read(read_data):
         out_bam_fh.close()
 
     # free unused RAM
-    del cigar, seq, quals, int_ref, int_seq, int_cig, nshifts_buf, shiftlen_buf
+    del cigar, seq, quals, int_ref, int_seq, int_cigops, int_cigcts
     if psutil.virtual_memory().percent > 90:
         gc.collect()
     
@@ -81,9 +83,12 @@ def realign_hap(hap_data):
     algorithm, taking n-polymer indels into account. Return data, not print.
     '''
     contig, hap, seq, ref, cigar = hap_data
+    int_cigops = np.array([c[0] for c in cigar], dtype=np.uint8)
+    int_cigcts = np.array([c[1] for c in cigar], dtype=np.intc)
     int_ref = bases_to_int(ref)
     int_seq = bases_to_int(seq)
-    cigar = align(int_ref, int_seq, cigar, cfg.args.sub_scores, cfg.args.np_scores)
+    cigar = align(int_ref, int_seq, int_cigops, int_cigcts, 
+            cfg.args.sub_scores, cfg.args.np_scores)
     with cfg.counter.get_lock():
         cfg.counter.value += 1
         print(f"\r    {cfg.counter.value} reads processed.", end='', flush=True)

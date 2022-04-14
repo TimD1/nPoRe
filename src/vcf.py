@@ -211,7 +211,9 @@ def apply_vcf(vcf_fn, hap):
     vcf = pysam.VariantFile(vcf_fn, 'r')
     data = []
     for contig, start, stop in cfg.args.regions:
-        cig = ''
+        cig = []
+        cig_op = 'Z'
+        cig_ct = 0
         seq = ''
         ref_ptr = 0
         ref = get_fasta(cfg.args.ref, contig)
@@ -227,18 +229,30 @@ def apply_vcf(vcf_fn, hap):
 
                 if indel_len > 0: # allow insertions
                     seq += record.alleles[1][len(record.alleles[0]):]
-                    cig += 'I' * indel_len
+                    if cig_op == 'I':
+                        cig_ct += indel_len
+                    else:
+                        cig.append( (cfg.cigar_dict[cig_op], cig_ct) )
+                        cig_op, cig_ct = 'I', indel_len
 
                 elif indel_len < 0 and pos == ref_ptr - 1: # deletion, but only first base overlaps
                     indel_len = abs(indel_len)
-                    cig += 'D' * indel_len
+                    if cig_op == 'D':
+                        cig_ct += indel_len
+                    else:
+                        cig.append( (cfg.cigar_dict[cig_op], cig_ct) )
+                        cig_op, cig_ct = 'D', indel_len
                     ref_ptr += indel_len
 
                 continue
 
             else: # no overlap, add '=' until new variant
                 seq += ref[ref_ptr:pos]
-                cig += '=' * (pos - ref_ptr)
+                if cig_op == '=':
+                    cig_ct += pos - ref_ptr
+                else:
+                    cig.append( (cfg.cigar_dict[cig_op], cig_ct) )
+                    cig_op, cig_ct = '=', pos - ref_ptr
                 ref_ptr += pos-ref_ptr
 
             # check if current variant is sub/ins/del
@@ -246,25 +260,46 @@ def apply_vcf(vcf_fn, hap):
             minlen = min(len(record.alleles[0]), len(record.alleles[1]))
             for i in range(minlen):
                 if record.alleles[0][i] == record.alleles[1][i]: # sub/match
-                    cig += '='
+                    if cig_op == '=':
+                        cig_ct += 1
+                    else:
+                        cig.append( (cfg.cigar_dict[cig_op], cig_ct) )
+                        cig_op, cig_ct = '=', 1
                     ref_ptr += 1
                 else:
-                    cig += 'X'
+                    if cig_op == 'X':
+                        cig_ct += 1
+                    else:
+                        cig.append( (cfg.cigar_dict[cig_op], cig_ct) )
+                        cig_op, cig_ct = 'X', 1
                     ref_ptr += 1
 
             indel_len = len(record.alleles[1]) - len(record.alleles[0])
             if indel_len > 0:   # insertion
-                cig += 'I' * indel_len
+                if cig_op == 'I':
+                    cig_ct += indel_len
+                else:
+                    cig.append( (cfg.cigar_dict[cig_op], cig_ct) )
+                    cig_op, cig_ct = 'I', indel_len
 
             elif indel_len < 0:   # deletion
                 indel_len = abs(indel_len)
-                cig += 'D' * indel_len
+                if cig_op == 'D':
+                    cig_ct += indel_len
+                else:
+                    cig.append( (cfg.cigar_dict[cig_op], cig_ct) )
+                    cig_op, cig_ct = 'D', indel_len
                 ref_ptr += indel_len
 
         # add remaining (all matches)
-        cig += '=' * (len_ref - ref_ptr)
+        if cig_op == '=':
+            cig_ct += len_ref - ref_ptr
+        else:
+            cig.append( (cfg.cigar_dict[cig_op], cig_ct) )
+            cig_op, cig_ct = '=', len_ref - ref_ptr
+        cig.append( (cfg.cigar_dict[cig_op], cig_ct) )
         seq += ref[ref_ptr:]
-        data.append( (contig, hap, seq, ref, cig) )
+        data.append( (contig, hap, seq, ref, cig[1:]) )
 
     return data
 
@@ -297,17 +332,14 @@ def gen_vcf(hap_data, hap, vcf_out_pre = ''):
         seq_ptr = 0
         cig_ptr = 0
         cig_len = len(cigar)
-        typ = 0
         while cig_ptr < cig_len:
 
             if cigar[cig_ptr] == '=':
-                typ = 0
                 ref_ptr += 1
                 seq_ptr += 1
                 cig_ptr += 1
 
             elif cigar[cig_ptr] == 'X':
-                typ = 0
                 record = vcf_out.header.new_record(
                         contig = contig,
                         start = ref_ptr,
@@ -321,7 +353,6 @@ def gen_vcf(hap_data, hap, vcf_out_pre = ''):
                 cig_ptr += 1
 
             elif cigar[cig_ptr] == 'M':
-                typ = 0
                 # match, don't add to VCF
                 if ref[ref_ptr] == seq[seq_ptr]:
                     ref_ptr += 1
@@ -341,7 +372,6 @@ def gen_vcf(hap_data, hap, vcf_out_pre = ''):
                     cig_ptr += 1
 
             elif cigar[cig_ptr] == 'D':
-                typ = 1
                 del_len = 0
                 while cig_ptr < cig_len and cigar[cig_ptr] == 'D':
                     del_len += 1
@@ -358,7 +388,6 @@ def gen_vcf(hap_data, hap, vcf_out_pre = ''):
                 ref_ptr += del_len
 
             elif cigar[cig_ptr] == 'I':
-                typ = 2
                 ins_len = 0
                 while cig_ptr < cig_len and cigar[cig_ptr] == 'I':
                     ins_len += 1
@@ -378,18 +407,6 @@ def gen_vcf(hap_data, hap, vcf_out_pre = ''):
                 print(f"\nERROR: unrecognized CIGAR operation '{cigar[cig_ptr]}'")
                 exit(1)
     vcf_out.close()
-    # except IndexError:
-    #     print(f'INDEX ERROR: ctg: {contig}, hap: {hap}, ref_ptr: {ref_ptr}, len(ref): {len(ref)}, seq_ptr: {seq_ptr}, len(seq): {len(seq)}, cig_ptr: {cig_ptr}, cig_len: {cig_len}, ref_len: {ref_len(cigar)}, seq_len: {seq_len(cigar)}')
-    #     exit(1)
-    # except ValueError:
-    #     print(f'VALUE ERROR: ctg: {contig}, hap: {hap}, ref_ptr: {ref_ptr}, len(ref): {len(ref)}, seq_ptr: {seq_ptr}, len(seq): {len(seq)}, cig_ptr: {cig_ptr}, cig_len: {cig_len}, ref_len: {ref_len(cigar)}, seq_len: {seq_len(cigar)}')
-    #     if typ == 0:
-    #         print(f'M: {ref[ref_ptr]}, {seq[seq_ptr]}')
-    #     elif typ == 1:
-    #         print(f'D: {ref[ref_ptr-1:ref_ptr+del_len]}, {ref[ref_ptr-1]}', del_len)
-    #     elif typ == 2:
-    #         print(f'I: {ref[ref_ptr-1]}, {seq[seq_ptr-1:seq_ptr+ins_len]}', ins_len)
-    #     exit(1)
 
     # wait until file is closed
     while True:
