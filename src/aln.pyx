@@ -303,7 +303,7 @@ cdef int[::1] get_inss(char[::1] cigar_ops, int[::1] cigar_counts):
         if cigar_ops[i] == 1 or cigar_ops[i] == 2: # I/D
             inss_len += cigar_counts[i]
         elif cigar_ops[i] == 0 or cigar_ops[i] == 7 or cigar_ops[i] == 8: # M/=/X
-            inss_len += cigar_counts[i] * 2 # converted to I+D
+            inss_len += cigar_counts[i] * 2 # converted to D+I
         # else ignore S/H
 
     # populate inss array
@@ -319,8 +319,8 @@ cdef int[::1] get_inss(char[::1] cigar_ops, int[::1] cigar_counts):
                 inss[pos+1] = inss[pos]
                 pos += 1
             elif cigar_ops[i] == 0 or cigar_ops[i] == 7 or cigar_ops[i] == 8: # M/=/X
-                inss[pos+1] = inss[pos]+1 # I
-                inss[pos+2] = inss[pos]+1 # D
+                inss[pos+1] = inss[pos]   # D
+                inss[pos+2] = inss[pos]+1 # I
                 pos += 2
     return inss
 
@@ -339,7 +339,7 @@ cdef int[::1] get_dels(char[::1] cigar_ops, int[::1] cigar_counts):
         if cigar_ops[i] == 1 or cigar_ops[i] == 2: # I/D
             dels_len += cigar_counts[i]
         elif cigar_ops[i] == 0 or cigar_ops[i] == 7 or cigar_ops[i] == 8: # M/=/X
-            dels_len += cigar_counts[i] * 2 # converted to I+D
+            dels_len += cigar_counts[i] * 2 # converted to D+I
         # else ignore S/H
 
     # populate dels array
@@ -355,8 +355,8 @@ cdef int[::1] get_dels(char[::1] cigar_ops, int[::1] cigar_counts):
                 dels[pos+1] = dels[pos]+1
                 pos += 1
             elif cigar_ops[i] == 0 or cigar_ops[i] == 7 or cigar_ops[i] == 8: # M/=/X
-                dels[pos+1] = dels[pos]   # I
-                dels[pos+2] = dels[pos]+1 # D
+                dels[pos+1] = dels[pos]+1 # D
+                dels[pos+2] = dels[pos]+1 # I
                 pos += 2
     return dels
 
