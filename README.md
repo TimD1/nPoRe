@@ -85,6 +85,19 @@ sudo docker run -it timd1/npore:latest python3 realign.py --help
 
 ## Usage
 
+### Prerequisites
+All input BAMs are required to:
+
+1. Have `MD` tag annotations (for `pysam` read to ref mapping)
+2. Be indexed (have an associated `.bam.bai` file)
+
+You can prepare your input BAM using <a href="http://www.htslib.org">`samtools`</a>:
+
+```bash
+samtools calmd -@ `nproc` -b -Q orig_reads.bam ref.fasta > reads.bam
+samtools index reads.bam
+```
+
 #### Option 1: GitHub Source
 Here's an example usage of the main `realign.py` program, which will store results in `realigned.sam`.
 
