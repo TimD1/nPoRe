@@ -112,7 +112,7 @@ def main():
         pool.imap_unordered(realign_read, read_data, chunksize=100)
         pool.close()
         pool.join()
-    print(f'\n    runtime: {perf_counter()-start:.2f}s')
+    print(f'    runtime: {perf_counter()-start:.2f}s')
 
 
 

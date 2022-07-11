@@ -40,7 +40,8 @@ def get_read_data(bam_fn):
                     read.cigarstring,
                     read.reference_start + read.reference_length,
                     read.query_alignment_sequence.upper(),
-                    ''.join([chr(33+x) for x in read.query_alignment_qualities]),
+                    '*' if not read.query_alignment_qualities else \
+						''.join([chr(33+x) for x in read.query_alignment_qualities]), 
                     read.get_reference_sequence().upper(),
                     0 if not read.has_tag('HP') else int(read.get_tag('HP'))
                 )
