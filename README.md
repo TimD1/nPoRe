@@ -44,20 +44,27 @@ Please cite the following pre-print if you use `npore`:
 ## Installation
 
 #### Option 1: GitHub Source
-Installation requires a working version of `virtualenv` and `python3`. Python packages in `requirements.txt` will be downloaded as part of the installation. Simply run:
+First, clone the repository:
 
 ```bash
-$ git clone https://github.com/TimD1/npore && cd npore && make
+git clone https://github.com/timd1/npore && cd npore
 ```
 
-This makefile will create a virtual environment, download the required packages, and build `npore`. After setup, run:
+Next, set up a virtual environment, activate it, and install the required packages.
 
 ```bash
-. ./venv3/bin/activate
+python3 -m venv venv3 --prompt "npore"
+source ./venv3/bin/activate
+python3 -m pip install -r requirements.txt
+```
+
+Please ensure this environment is activated when building or running `npore`. 
+Lastly, build `npore` and verify that it has succeeded.
+
+```bash
+make
 python3 ./src/realign.py --help
 ```
-
-to verify the setup has succeeded.
 
 #### Option 2: Docker Hub Image
 A pre-built Docker image can be downloaded from <a href="https://hub.docker.com/r/timd1/npore">here</a> using:
