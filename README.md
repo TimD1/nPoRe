@@ -55,6 +55,7 @@ Next, set up a virtual environment, activate it, and install the required packag
 ```bash
 python3 -m venv venv3 --prompt "npore"
 source ./venv3/bin/activate
+python3 -m pip install --upgrade pip
 python3 -m pip install -r requirements.txt
 ```
 
